@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments (we use conda, but just in case)
+venv/
+env/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Hydra
+outputs/
+multirun/
+.hydra/
+
+# TensorBoard / experiment outputs
+runs/
+logs/
+wandb/
+*.tfevents.*
+
+# Model checkpoints
+*.ckpt
+*.pt
+*.pth
+checkpoints/
+
+# Data files (too big for git; keep raw data outside the repo or in DVC/git-lfs)
+data/raw/*
+data/surfaces/*
+!data/raw/.gitkeep
+!data/surfaces/.gitkeep
+
+# Allow splits to be tracked
+!data/splits/*.json
+
+# Evaluation outputs
+*.csv
+!tests/fixtures/*.csv
