@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "horizons"
+version = "0.0.1"
+description = "GNN-based extrapolation of geological horizon surfaces."
+requires-python = ">=3.11"
+# Runtime deps are managed via conda + pip directly, not pinned here.
+# This file exists primarily to enable `pip install -e .`.
+
+[tool.setuptools.packages.find]
+include = ["horizons*"]
+exclude = ["tests*", "scripts*", "configs*", "data*", "outputs*", "notebooks*"]
