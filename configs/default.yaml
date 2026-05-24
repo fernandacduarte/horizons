@@ -1,0 +1,94 @@
+# ============================================================
+# Default configuration for horizon-extrapolation experiments.
+# Every hyperparameter the project uses should live here.
+# Override on the command line, e.g.:
+#   python scripts/train.py model.hidden_dim=128 optim.lr=5e-4
+# ============================================================
+
+# Top-level reproducibility
+seed: 42
+
+# --------------------------------------------------------
+# Data
+# --------------------------------------------------------
+data:
+  surfaces_dir: data/surfaces        # processed mesh files live here
+  split_file: data/splits/split_v1.json
+  device: mps                        # mps | cpu | cuda
+
+# --------------------------------------------------------
+# Mask sampler (Stage 2)
+# Three regimes:
+#   1. half_plane:    cut along a line at some orientation theta
+#   2. outward_free:  unknown frame around central rectangle
+#   3. outward_pinned: same as outward_free + outer boundary
+#                     ring added back to known
+# --------------------------------------------------------
+mask:
+  regime_weights:
+    half_plane: 0.30
+    outward_free: 0.40
+    outward_pinned: 0.30
+
+  # Fraction of vertices marked unknown
+  half_plane_phi: [0.30, 0.50]       # sample uniform from this set
+  outward_phi: [0.50, 0.70]          # for both outward regimes
+
+  # Outward-regime rectangle randomization
+  outward_rect_offset_std: 0.05       # fraction of bounding-box size
+  outward_rect_aspect_range: [0.5, 2.0]
+
+  # Pinned-regime far-boundary ring thickness (vertices)
+  pinned_ring_thickness: 1
+
+# --------------------------------------------------------
+# Features (Stage 1, 6)
+# --------------------------------------------------------
+features:
+  recompute_per_iteration: true      # see decision on open question 3
+  # All features are: (x, y, z_t, n_x, n_y, n_z, kappa, m, d)
+  # Dim = 9; nothing to configure beyond toggling recomputation.
+
+# --------------------------------------------------------
+# Model (Stage 6)
+# --------------------------------------------------------
+model:
+  type: sage                         # sage | edgeconv | gmm (sage default)
+  n_layers: 2                        # message-passing depth
+  hidden_dim: 64
+  aggr: mean                         # for SAGEConv
+  output_init_scale: 0.01            # small init for final layer
+
+# --------------------------------------------------------
+# Loss (Stage 7)
+# --------------------------------------------------------
+loss:
+  lambda_f: 1.0                      # frontier ring weight
+  lambda_p: 0.1                      # already-filled region weight
+  lambda_c: 0.01                     # curvature regularizer
+  lambda_r: 0.001                    # residual-step regularizer
+  rollout_weight: uniform            # uniform (constant for all rings) | linear (later rings heavier)
+
+# --------------------------------------------------------
+# Optimizer (Stages 8, 9)
+# --------------------------------------------------------
+optim:
+  type: adamw
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  grad_clip_norm: 1.0
+  accum_steps: 4                     # effective batch size = accum_steps
+
+# --------------------------------------------------------
+# Training loop (Stage 8)
+# --------------------------------------------------------
+train:
+  n_epochs: 200
+  patience: 30                       # early-stopping patience (epochs)
+  lr_schedule: cosine                # cosine | constant
+  warmup_epochs: 5
+  val_every: 1                       # epochs between validation passes
+
+  log_dir: outputs/tensorboard
+  ckpt_dir: outputs/checkpoints
+  ckpt_keep_last: 3                  # rolling latest-N checkpoints
