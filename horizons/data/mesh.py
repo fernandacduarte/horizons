@@ -129,3 +129,51 @@ def build_edge_index(F: torch.Tensor) -> torch.Tensor:
 
     # Convert to PyG convention: shape (2, n_edges)
     return directed.t().contiguous()
+
+
+def compute_boundary_vertices(F: torch.Tensor) -> torch.Tensor:
+    """Identify boundary vertices of a triangle mesh.
+
+    An edge is on the boundary iff exactly one face contains it.
+    A vertex is on the boundary iff at least one boundary edge touches it.
+
+    Parameters
+    ----------
+    F : torch.Tensor, shape (n_faces, 3), int64
+        Triangle indices.
+
+    Returns
+    -------
+    boundary : torch.Tensor, shape (n_vertices,), bool
+        True for boundary vertices.
+
+    Notes
+    -----
+    The number of vertices is inferred from F.max() + 1. If your mesh has
+    isolated vertices with no incident faces, they won't be detected here.
+    """
+    if F.dim() != 2 or F.shape[1] != 3:
+        raise ValueError(f"F must have shape (n, 3); got {tuple(F.shape)}")
+    if F.dtype != torch.int64:
+        raise TypeError(f"F must be int64; got {F.dtype}")
+
+    n_vertices = int(F.max().item()) + 1
+
+    # All edges (i, j) per face, canonical (sorted) form so (i,j) == (j,i)
+    e01 = F[:, [0, 1]]
+    e12 = F[:, [1, 2]]
+    e20 = F[:, [2, 0]]
+    all_edges = torch.cat([e01, e12, e20], dim=0)        # (3 * n_faces, 2)
+    canonical, _ = torch.sort(all_edges, dim=1)          # smaller index first
+
+    # Count occurrences of each unique canonical edge
+    unique_edges, counts = torch.unique(canonical, dim=0, return_counts=True)
+
+    # Boundary edges appear exactly once
+    boundary_edges = unique_edges[counts == 1]           # (n_boundary, 2)
+
+    # Vertices touching any boundary edge are boundary vertices
+    boundary = torch.zeros(n_vertices, dtype=torch.bool)
+    boundary[boundary_edges[:, 0]] = True
+    boundary[boundary_edges[:, 1]] = True
+    return boundary

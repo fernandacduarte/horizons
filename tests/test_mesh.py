@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from horizons.data.mesh import HorizonSurface, build_edge_index
+from horizons.data.mesh import HorizonSurface, build_edge_index, compute_boundary_vertices
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -142,3 +142,62 @@ class TestBuildEdgeIndex:
         ei = build_edge_index(F)
         # 5 undirected edges * 2 directions = 10 directed
         assert ei.shape == (2, 10)
+
+
+# ----------------------------------------------------------------------
+# compute_boundary_vertices
+# ----------------------------------------------------------------------
+class TestBoundaryVertices:
+    def test_single_triangle_all_boundary(self) -> None:
+        """A single triangle has 3 boundary edges and 3 boundary vertices."""
+        F = torch.tensor([[0, 1, 2]], dtype=torch.int64)
+        boundary = compute_boundary_vertices(F)
+        assert boundary.shape == (3,)
+        assert boundary.all(), "All 3 vertices of a single triangle are boundary"
+
+    def test_two_triangles_shared_edge(self) -> None:
+        """Two triangles sharing edge (1,2): vertices 0 and 3 are interior to
+        no triangle; vertex 1 and 2 are shared. Actually all four vertices
+        sit on the boundary because the union shape (a quadrilateral) has
+        all its corners on the boundary."""
+        F = torch.tensor([[0, 1, 2], [1, 2, 3]], dtype=torch.int64)
+        boundary = compute_boundary_vertices(F)
+        # Edge (1, 2) is shared (interior); edges (0,1), (0,2), (1,3), (2,3)
+        # are boundary. So all 4 vertices touch at least one boundary edge.
+        assert boundary.all()
+
+    def test_three_triangles_interior_vertex(self) -> None:
+        """Three triangles fanning around a central vertex 0:
+        (0,1,2), (0,2,3), (0,3,1). Vertex 0 is in the interior; 1, 2, 3
+        are on the boundary.
+        Edges (1,2), (2,3), (3,1) are boundary (each in one triangle).
+        Edges (0,1), (0,2), (0,3) are interior (each in two triangles).
+        """
+        F = torch.tensor(
+            [[0, 1, 2], [0, 2, 3], [0, 3, 1]], dtype=torch.int64
+        )
+        boundary = compute_boundary_vertices(F)
+        assert boundary.shape == (4,)
+        assert not boundary[0], "Central vertex 0 should NOT be boundary"
+        assert boundary[1] and boundary[2] and boundary[3]
+
+    def test_fixture_boundary_fraction(self, surface: HorizonSurface) -> None:
+        """On a Delaunay triangulation of random 2D points, the boundary
+        equals the convex hull of those points. For uniformly distributed
+        points, the expected hull size grows like O(log n) — so on
+        400-900-vertex fixtures we expect roughly 5-30 boundary vertices.
+
+        NOTE: real horizon meshes (GOCAD .ts) have proper boundary structure
+        with many more boundary vertices than the convex hull of a random
+        point cloud. When we add a fixture mimicking that, this test bound
+        will need to be widened accordingly.
+        """
+        boundary = compute_boundary_vertices(surface.F)
+        assert boundary.shape == (surface.n_vertices,)
+        n_boundary = int(boundary.sum().item())
+        # At least 3 (any non-degenerate mesh has 3+ hull vertices),
+        # at most 30% (a sanity ceiling).
+        assert 3 <= n_boundary <= int(0.30 * surface.n_vertices), (
+            f"Boundary has {n_boundary} vertices out of {surface.n_vertices} "
+            f"({n_boundary / surface.n_vertices:.1%}); expected 3 to 30%"
+        )
