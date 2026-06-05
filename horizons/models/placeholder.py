@@ -47,7 +47,7 @@ class TinySAGE(nn.Module):
         """Predict Δz per vertex from z^t.
 
         The placeholder ignores all features except z. The real operator
-        (Stage 6) will use all of them.
+        uses all of them.
 
         Returns
         -------
