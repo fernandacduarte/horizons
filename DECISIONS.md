@@ -238,18 +238,28 @@ via the plane fit) so the anchoring is a no-op for `t=0`.
 
 ## Stage 4 — Data split (deferred)
 
-### D4.1 — Defer the train/val/test split file
+### D4.1 — Defer the train/val/test split file (until after Stage 7)
 **Decision:** Do not create `data/splits/split_v1.json` until the GOCAD
 `.ts` loader exists and real surface data is available. Develop Stages
-5–7 against the three synthetic fixtures (`plane`, `sphere_cap`,
-`anticline`).
+5, 6, 7 against the three synthetic fixtures (`plane`, `sphere_cap`,
+`anticline`). Return to Stage 4 between Stages 7 and 8.
 **Where:** No code; this is a sequencing decision.
 **Why:** The split file requires real surface IDs and reservoir IDs.
-We can validate the dataset class, rollout, and model on synthetic
-fixtures first. The keystone overfit test (Stage 5.6) is more
-diagnostic on a known fixture than on a real horizon.
-**Status:** Open. Stage 4 will be completed alongside writing the
-GOCAD loader, expected after Stage 6 passes the overfit test.
+Stages 5–7 only need a single mesh to validate their machinery (the
+keystone overfit test is more diagnostic on a known fixture than on a
+real horizon). Stage 8 is the first stage where multi-surface
+train/val/test semantics matter, so that's the natural moment to wire
+in real data.
+**Plan when we get there:**
+  - 4A: write `HorizonSurface.from_ts(path)` parsing GOCAD TSurf format.
+  - 4B: one-time script converting all `.ts` files to `.npz` under
+    `data/surfaces/` with (surface_id, reservoir_id) metadata.
+  - 4C: stratified-by-reservoir 70/15/15 split written to
+    `data/splits/split_v1.json`.
+  - 4D: regenerate synthetic-fixture-like test fixtures from real-data
+    subsamples to replace the current synthetic anticline; the
+    convex-hull-boundary issue from D1.6 goes away naturally.
+**Status:** Open. Scheduled for completion between Stage 7 and Stage 8.
 
 ---
 
@@ -622,18 +632,28 @@ via the plane fit) so the anchoring is a no-op for `t=0`.
 
 ## Stage 4 — Data split (deferred)
 
-### D4.1 — Defer the train/val/test split file
+### D4.1 — Defer the train/val/test split file (until after Stage 7)
 **Decision:** Do not create `data/splits/split_v1.json` until the GOCAD
 `.ts` loader exists and real surface data is available. Develop Stages
-5–7 against the three synthetic fixtures (`plane`, `sphere_cap`,
-`anticline`).
+5, 6, 7 against the three synthetic fixtures (`plane`, `sphere_cap`,
+`anticline`). Return to Stage 4 between Stages 7 and 8.
 **Where:** No code; this is a sequencing decision.
 **Why:** The split file requires real surface IDs and reservoir IDs.
-We can validate the dataset class, rollout, and model on synthetic
-fixtures first. The keystone overfit test (Stage 5.6) is more
-diagnostic on a known fixture than on a real horizon.
-**Status:** Open. Stage 4 will be completed alongside writing the
-GOCAD loader, expected after Stage 6 passes the overfit test.
+Stages 5–7 only need a single mesh to validate their machinery (the
+keystone overfit test is more diagnostic on a known fixture than on a
+real horizon). Stage 8 is the first stage where multi-surface
+train/val/test semantics matter, so that's the natural moment to wire
+in real data.
+**Plan when we get there:**
+  - 4A: write `HorizonSurface.from_ts(path)` parsing GOCAD TSurf format.
+  - 4B: one-time script converting all `.ts` files to `.npz` under
+    `data/surfaces/` with (surface_id, reservoir_id) metadata.
+  - 4C: stratified-by-reservoir 70/15/15 split written to
+    `data/splits/split_v1.json`.
+  - 4D: regenerate synthetic-fixture-like test fixtures from real-data
+    subsamples to replace the current synthetic anticline; the
+    convex-hull-boundary issue from D1.6 goes away naturally.
+**Status:** Open. Scheduled for completion between Stage 7 and Stage 8.
 
 ---
 
