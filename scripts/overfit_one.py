@@ -24,6 +24,7 @@ from horizons.data.mesh import HorizonSurface
 from horizons.data.masking import MaskSampler, MaskSamplerConfig
 from horizons.data.init import init_z
 from horizons.models.placeholder import TinySAGE
+from horizons.models.operator import LocalOperator
 from horizons.training.rollout import rollout
 from horizons.training.loss import rollout_data_loss, per_iteration_data_loss
 
@@ -68,7 +69,22 @@ def main(cfg: DictConfig) -> None:
     # ------------------------------------------------------------------
     # Use a slightly larger placeholder for this overfit test to give it
     # enough capacity to make visible progress.
-    model = TinySAGE(hidden_dim=32, output_init_scale=0.01).to(device)
+    # Choose model based on config: "placeholder" (TinySAGE) or
+    # "operator" (real LocalOperator).
+    model_kind = cfg.model_kind
+    if model_kind == "placeholder":
+        model = TinySAGE(hidden_dim=32, output_init_scale=0.01).to(device)
+    elif model_kind == "operator":
+        model = LocalOperator(
+            hidden_dim=cfg.model.hidden_dim,
+            n_message_passing=cfg.model.n_layers,
+            output_init_scale=cfg.model.output_init_scale,
+        ).to(device)
+    else:
+        raise ValueError(
+            f"Unknown model_kind {model_kind!r}; expected 'placeholder' or 'operator'"
+        )
+    print(f"Model: {model_kind} | params: {sum(p.numel() for p in model.parameters()):,}")
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=cfg.optim.lr,
         weight_decay=cfg.optim.weight_decay,

@@ -52,6 +52,11 @@ features:
 # --------------------------------------------------------
 # Model (Stage 6)
 # --------------------------------------------------------
+# model_kind selects which architecture is instantiated:
+#   - operator: the real LocalOperator (Stage 6+, used for everything serious)
+#   - placeholder: TinySAGE (Stage 5 sanity-check only)
+model_kind: operator
+
 model:
   type: sage                         # sage | edgeconv | gmm (sage default)
   n_layers: 2                        # message-passing depth
