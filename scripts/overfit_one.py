@@ -26,7 +26,7 @@ from horizons.data.init import init_z
 from horizons.models.placeholder import TinySAGE
 from horizons.models.operator import LocalOperator
 from horizons.training.rollout import rollout
-from horizons.training.loss import rollout_data_loss, per_iteration_data_loss
+from horizons.training.loss import rollout_loss, per_iteration_data_loss
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="default")
@@ -96,7 +96,7 @@ def main(cfg: DictConfig) -> None:
     n_steps = cfg.get("n_steps", 1000)
     log_every = max(1, n_steps // 50)  # ~50 log points
 
-    history = {"step": [], "loss": []}
+    history = {"step": [], "loss": [], "data": [], "curv": [], "res": []}
     per_iter_history: dict[int, list[float]] = {t: [] for t in range(1, N + 1)}
 
     for step in range(n_steps):
@@ -109,10 +109,14 @@ def main(cfg: DictConfig) -> None:
             mask=mask, d=d, N=N,
         )
 
-        loss = rollout_data_loss(
-            result.z_trajectory, z_true, d,
+        loss_dict = rollout_loss(
+            z_trajectory=result.z_trajectory,
+            dz_trajectory=result.dz_trajectory,
+            z_true=z_true, d=d, edge_index=edge_index, mask=mask,
             lambda_f=cfg.loss.lambda_f, lambda_p=cfg.loss.lambda_p,
+            lambda_c=cfg.loss.lambda_c, lambda_r=cfg.loss.lambda_r,
         )
+        loss = loss_dict["total"]
 
         loss.backward()
 
@@ -135,12 +139,19 @@ def main(cfg: DictConfig) -> None:
                 ]
             history["step"].append(step)
             history["loss"].append(loss.item())
+            history["data"].append(loss_dict["data"].item())
+            history["curv"].append(loss_dict["curv"].item())
+            history["res"].append(loss_dict["res"].item())
             for t in range(1, N + 1):
                 per_iter_history[t].append(per_iter[t - 1])
 
             if step % (log_every * 5) == 0 or step == n_steps - 1:
-                print(f"step {step:5d}  loss {loss.item():.6f}  "
-                      f"per-iter min/max [{min(per_iter):.4f}, {max(per_iter):.4f}]")
+                print(
+                    f"step {step:5d}  total {loss.item():.6f}  "
+                    f"(data {loss_dict['data'].item():.4f}  "
+                    f"curv {loss_dict['curv'].item():.4f}  "
+                    f"res {loss_dict['res'].item():.4f})"
+                )
 
     print()
     print(f"Initial loss: {history['loss'][0]:.6f}")
@@ -150,16 +161,18 @@ def main(cfg: DictConfig) -> None:
     # ------------------------------------------------------------------
     # Plot
     # ------------------------------------------------------------------
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    fig, axes = plt.subplots(1, 3, figsize=(18, 4))
 
+    # Panel 1: total loss
     axes[0].plot(history["step"], history["loss"])
     axes[0].set_yscale("log")
     axes[0].set_xlabel("optimizer step")
-    axes[0].set_ylabel("rollout data loss")
+    axes[0].set_ylabel("rollout total loss")
     axes[0].set_title(f"Overfit on one (surface, mask)\n"
                       f"{surface.surface_id} | {regime} | N={N}")
     axes[0].grid(True, which="both", linewidth=0.3)
 
+    # Panel 2: per-iteration L_t (data only, for comparability with Stage 6)
     cmap = plt.cm.viridis
     for t in range(1, N + 1):
         color = cmap(t / N)
@@ -167,10 +180,21 @@ def main(cfg: DictConfig) -> None:
                      color=color, label=f"t={t}", linewidth=1.0)
     axes[1].set_yscale("log")
     axes[1].set_xlabel("optimizer step")
-    axes[1].set_ylabel("per-iteration loss L_t")
-    axes[1].set_title("Per-iteration loss (color = depth t)")
+    axes[1].set_ylabel("per-iteration data loss L_data_t")
+    axes[1].set_title("Per-iteration data loss (color = depth t)")
     axes[1].grid(True, which="both", linewidth=0.3)
     axes[1].legend(fontsize=7, ncol=2)
+
+    # Panel 3: three loss components on a shared axis
+    axes[2].plot(history["step"], history["data"], label="data", color="C0")
+    axes[2].plot(history["step"], history["curv"], label="curv (unscaled)", color="C1")
+    axes[2].plot(history["step"], history["res"], label="res (unscaled)", color="C2")
+    axes[2].set_yscale("log")
+    axes[2].set_xlabel("optimizer step")
+    axes[2].set_ylabel("loss component (unscaled)")
+    axes[2].set_title("Components (unscaled — λ_c, λ_r not applied here)")
+    axes[2].grid(True, which="both", linewidth=0.3)
+    axes[2].legend(fontsize=8)
 
     fig.tight_layout()
     out_path = Path(cfg.train.log_dir) / "overfit_one.png"

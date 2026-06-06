@@ -124,12 +124,12 @@ class LocalOperator(nn.Module):
         # Input projection
         h = self.input_proj(features)                              # (n, H)
 
-        # Message-passing stack (ReLU between layers, not after last)
-        for i, conv in enumerate(self.convs):
+        # Message-passing stack with ReLU between every layer.
+        # The final ReLU before the head gives the readout MLP a
+        # non-linear input to combine.
+        for conv in self.convs:
             h = conv(h, edge_index)
-            if i < len(self.convs) - 1:
-                h = torch.relu(h)
-        h = torch.relu(h)  # final activation before head
+            h = torch.relu(h)
 
         # Output head -> scalar per vertex
         dz = self.head(h).squeeze(1)                               # (n,)
