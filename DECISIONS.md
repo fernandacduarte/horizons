@@ -695,3 +695,7 @@ and add a note explaining what changed.
 This document is the single source of truth for "why is the code this
 way." If a future reader (yourself in three months, an advisor, a
 reviewer) asks "why mean and not sum?", point them at D5.7.
+
+For empirical findings discovered while running the code (what we
+*learned* from experiments, rather than what we *chose*), see
+`OBSERVATIONS.md`.
