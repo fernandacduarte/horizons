@@ -49,6 +49,12 @@ class HorizonDataset(Dataset):
         Train masks use the current epoch; val/test masks use epoch=0 always.
     initial_epoch : int
         Starting epoch (relevant only for training masks).
+    center_per_surface : bool, default True
+        Whether to apply per-surface centering of (x, y, z) to the
+        coordinates returned by __getitem__. x, y centered by all-vertex
+        mean; z centered by the mean over known vertices (using z[U]
+        would leak ground truth). See D4.6. Default True; set False for
+        tests that compare against uncentered fixtures.
     """
 
     def __init__(
@@ -57,6 +63,7 @@ class HorizonDataset(Dataset):
         mask_sampler: MaskSampler,
         split: str,
         initial_epoch: int = 0,
+        center_per_surface: bool = True,
     ) -> None:
         if len(surfaces) == 0:
             raise ValueError("HorizonDataset must be non-empty")
@@ -64,6 +71,7 @@ class HorizonDataset(Dataset):
         self.mask_sampler = mask_sampler
         self.split = split
         self._epoch = initial_epoch
+        self.center_per_surface = center_per_surface
 
     def set_epoch(self, epoch: int) -> None:
         """Called at the start of each training epoch so masks resample.
@@ -84,11 +92,27 @@ class HorizonDataset(Dataset):
         rng = _make_rng(surface.surface_id, epoch_for_seed, self.split)
 
         mask, d, regime = self.mask_sampler.sample(surface, rng)
-        z0 = init_z(surface.V, mask)
+
+        # Per-surface centering (resolves D4.6).
+        # x, y can use all vertices since they're fully observed.
+        # z MUST use only z[K] — using z[U] would leak ground truth into
+        # the input the model sees.
+        if self.center_per_surface:
+            xy_mean = surface.V[:, :2].mean(dim=0)
+            z_mean = surface.V[mask, 2].mean()
+            V_centered = surface.V.clone()
+            V_centered[:, :2] = surface.V[:, :2] - xy_mean
+            V_centered[:, 2] = surface.V[:, 2] - z_mean
+        else:
+            V_centered = surface.V
+            xy_mean = torch.zeros(2, dtype=surface.V.dtype)
+            z_mean = surface.V.new_zeros(())
+
+        z0 = init_z(V_centered, mask)
 
         return {
-            # Mesh
-            "V": surface.V,                  # (n, 3)
+            # Mesh (V is centered if center_per_surface=True)
+            "V": V_centered,                 # (n, 3)
             "F": surface.F,                  # (n_faces, 3)
             "edge_index": surface.edge_index,  # (2, n_edges_directed)
             # Mask + topological distance
@@ -97,7 +121,10 @@ class HorizonDataset(Dataset):
             "N": int(d.max().item()),        # int: rollout depth
             # Initial state
             "z0": z0,                        # (n,) float
-            "z_true": surface.V[:, 2],       # (n,) float — the supervision target
+            "z_true": V_centered[:, 2],      # (n,) float — supervision target (centered)
+            # Centering offsets (for inverting the prediction back to original frame)
+            "xy_mean": xy_mean,              # (2,) float
+            "z_mean": z_mean if isinstance(z_mean, torch.Tensor) else torch.tensor(z_mean),
             # Metadata
             "surface_id": surface.surface_id,
             "reservoir_id": surface.reservoir_id,
@@ -123,4 +150,31 @@ def load_fixture_dataset(
     if mask_config is None:
         mask_config = MaskSamplerConfig()
     sampler = MaskSampler(mask_config)
-    return HorizonDataset(surfaces, sampler, split=split)
+    return HorizonDataset(surfaces, sampler, split=split,
+                          center_per_surface=False)
+
+
+def load_split_dataset(
+    split_name: str,
+    mask_config: MaskSamplerConfig | None = None,
+    surfaces_dir: str | Path = "data/surfaces",
+    split_file: str | Path = "data/splits/split_v1.json",
+    center_per_surface: bool = True,
+) -> HorizonDataset:
+    """Build a HorizonDataset for one of the real-data splits.
+
+    Loads from data/surfaces/ and data/splits/split_v1.json (produced by
+    scripts/build_dataset.py and scripts/build_split.py respectively).
+    Applies per-surface centering by default — see D4.6.
+    """
+    from horizons.data.loaders import load_split as _load_split
+    surfaces = _load_split(
+        split_name, surfaces_dir=surfaces_dir, split_file=split_file,
+    )
+    if mask_config is None:
+        mask_config = MaskSamplerConfig()
+    sampler = MaskSampler(mask_config)
+    return HorizonDataset(
+        surfaces, sampler, split=split_name,
+        center_per_surface=center_per_surface,
+    )

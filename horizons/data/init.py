@@ -38,17 +38,25 @@ def fit_mean_plane(
     if xy_K.shape[0] < 3:
         raise ValueError(f"Need at least 3 known points; got {xy_K.shape[0]}")
 
-    # Center x, y before solving. Real-world geospatial coordinates can have
-    # very large absolute values (e.g. UTM eastings ~1e5, northings ~1e7);
-    # building the design matrix on raw values causes float32 precision loss
-    # and a spurious rank-deficient result. We solve in the centered frame
-    # and convert the intercept back at the end.
-    xy_mean = xy_K.mean(dim=0)                                        # (2,)
-    xy_centered = xy_K - xy_mean                                       # (n_known, 2)
-    ones = torch.ones(xy_K.shape[0], 1, dtype=xy_K.dtype)
+    # Promote to float64 for the linear algebra. Real-world geospatial
+    # coordinates can have very large absolute values (UTM eastings ~1e5,
+    # northings ~1e7); on float32 the mean computation itself loses
+    # precision, so centering on float32 doesn't fully recover us. float64
+    # gives us ~15 digits of precision, which is enough headroom for any
+    # realistic coordinate system. The returned a, b, c are Python floats
+    # so the downstream caller sees no dtype change.
+    xy_K_d = xy_K.to(torch.float64)
+    z_K_d = z_K.to(torch.float64)
+
+    # Center x, y before solving (still helpful even in float64 for
+    # conditioning, since the design matrix [x, y, 1] has very different
+    # column norms when x ~ 1e7).
+    xy_mean = xy_K_d.mean(dim=0)                                       # (2,)
+    xy_centered = xy_K_d - xy_mean                                     # (n_known, 2)
+    ones = torch.ones(xy_K_d.shape[0], 1, dtype=torch.float64)
     X = torch.cat([xy_centered, ones], dim=1)                          # (n_known, 3)
 
-    # Rank check on the centered matrix is numerically reliable.
+    # Rank check on the centered matrix is numerically reliable in float64.
     rank = int(torch.linalg.matrix_rank(X).item())
     if rank < 3:
         raise ValueError(
@@ -58,7 +66,7 @@ def fit_mean_plane(
 
     # Least-squares solve on centered coordinates. lstsq handles the full-rank
     # case correctly; we already checked rank > 2 above.
-    solution = torch.linalg.lstsq(X, z_K.unsqueeze(1))
+    solution = torch.linalg.lstsq(X, z_K_d.unsqueeze(1))
     coeffs = solution.solution.squeeze(1)                              # (3,)
     a_c, b_c, c_centered = coeffs.tolist()
 

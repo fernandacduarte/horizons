@@ -5,7 +5,8 @@ import pytest
 import torch
 
 from horizons.data.dataset import HorizonDataset, load_fixture_dataset
-from horizons.data.masking import MaskSamplerConfig
+from horizons.data.mesh import HorizonSurface
+from horizons.data.masking import MaskSampler, MaskSamplerConfig
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -51,6 +52,7 @@ class TestBasic:
             "V", "F", "edge_index",
             "mask", "d", "N",
             "z0", "z_true",
+            "xy_mean", "z_mean",
             "surface_id", "reservoir_id", "regime",
         }
         assert set(item.keys()) == expected_keys
@@ -167,3 +169,124 @@ class TestEpochResampling:
         v_item = val_dataset[val_ids.index(sid)]
         # Not deeply equal because the seed strings differ
         assert not torch.equal(t_item["mask"], v_item["mask"])
+
+
+
+class TestCentering:
+    """Tests for per-surface (x, y, z) centering (D4.6)."""
+
+    @pytest.fixture
+    def utm_like_surfaces(self) -> list[HorizonSurface]:
+        """Load real surfaces from data/surfaces/ to test centering.
+
+        Earlier we tried synthesizing fake UTM-scale surfaces, but the
+        mask sampler requires a properly-triangulated mesh (which our
+        synthetic random triangles aren't), so it failed with
+        connectivity errors. The real surfaces are exactly what we
+        need: UTM-scale coords + valid topology. Skip if not present.
+        """
+        from horizons.data.mesh import HorizonSurface
+        surfaces_dir = Path("data/surfaces")
+        if not surfaces_dir.exists():
+            pytest.skip(
+                "data/surfaces/ not found — run scripts/build_dataset.py "
+                "to populate."
+            )
+        # Pick two arbitrary real surfaces — small enough to be fast
+        candidates = sorted(surfaces_dir.glob("0*.npz"))[:2]
+        if len(candidates) < 2:
+            pytest.skip(f"Need 2+ real surfaces; found {len(candidates)}")
+        return [HorizonSurface.from_npz(p, surface_id=p.stem) for p in candidates]
+
+    def test_centered_dataset_returns_centered_coords(
+        self, utm_like_surfaces: list[HorizonSurface],
+    ) -> None:
+        """With center_per_surface=True, returned V should be small."""
+        sampler = MaskSampler(MaskSamplerConfig())
+        ds = HorizonDataset(
+            utm_like_surfaces, sampler, split="train",
+            center_per_surface=True,
+        )
+        item = ds[0]
+        V = item["V"]
+        # Centered x, y, z should all be small relative to original
+        # (UTM coords are ~1e5-1e7; centered should be at most ~5e4 m,
+        # i.e., the half-extent of a typical horizon footprint).
+        # The critical property is "much smaller than absolute UTM
+        # magnitudes", not "< 10 km".
+        original_xy_max = utm_like_surfaces[0].V[:, :2].abs().max().item()
+        centered_xy_max = V[:, :2].abs().max().item()
+        assert centered_xy_max < original_xy_max / 10, (
+            f"x/y not centered; centered max={centered_xy_max:.0f}, "
+            f"original max={original_xy_max:.0f}"
+        )
+        # Z is a smaller-scale variable but still benefits from centering.
+        original_z_max = utm_like_surfaces[0].V[:, 2].abs().max().item()
+        centered_z_max = V[:, 2].abs().max().item()
+        assert centered_z_max < original_z_max, (
+            f"z not centered; centered max={centered_z_max:.2f}, "
+            f"original max={original_z_max:.2f}"
+        )
+
+    def test_centering_offsets_returned_in_dict(
+        self, utm_like_surfaces: list[HorizonSurface],
+    ) -> None:
+        """xy_mean and z_mean must be in the dict and match the actual offsets."""
+        sampler = MaskSampler(MaskSamplerConfig())
+        ds = HorizonDataset(
+            utm_like_surfaces, sampler, split="train",
+            center_per_surface=True,
+        )
+        item = ds[0]
+        surface = utm_like_surfaces[0]
+        # xy_mean should equal the all-vertex mean
+        assert torch.allclose(item["xy_mean"], surface.V[:, :2].mean(dim=0))
+        # z_mean should equal the mean over the known vertices in this item
+        mask = item["mask"]
+        expected_z_mean = surface.V[mask, 2].mean()
+        assert torch.allclose(item["z_mean"], expected_z_mean)
+
+    def test_uncentered_dataset_returns_raw_coords(
+        self, utm_like_surfaces: list[HorizonSurface],
+    ) -> None:
+        """With center_per_surface=False, returned V should equal the input."""
+        sampler = MaskSampler(MaskSamplerConfig())
+        ds = HorizonDataset(
+            utm_like_surfaces, sampler, split="train",
+            center_per_surface=False,
+        )
+        item = ds[0]
+        assert torch.allclose(item["V"], utm_like_surfaces[0].V)
+        # xy_mean and z_mean should be zero
+        assert torch.allclose(item["xy_mean"], torch.zeros(2))
+        assert item["z_mean"].item() == 0.0
+
+    def test_z_centering_uses_only_known_vertices(
+        self, utm_like_surfaces: list[HorizonSurface],
+    ) -> None:
+        """z_mean must be computed from z[K], not from all z values.
+
+        This is the critical no-leakage property: we cannot use z[U] for
+        anything the model can see, because the model is supposed to
+        predict z[U].
+        """
+        sampler = MaskSampler(MaskSamplerConfig())
+        ds = HorizonDataset(
+            utm_like_surfaces, sampler, split="train",
+            center_per_surface=True,
+        )
+        item = ds[0]
+        mask = item["mask"]
+        surface = utm_like_surfaces[0]
+
+        z_mean_from_K = surface.V[mask, 2].mean()
+        z_mean_from_all = surface.V[:, 2].mean()
+        # These should differ in general (otherwise the test is trivial)
+        assert not torch.allclose(z_mean_from_K, z_mean_from_all), (
+            "Test fixture too symmetric: z_mean over K equals z_mean over all. "
+            "Try a different RNG seed."
+        )
+        # The returned z_mean must match z[K]'s mean, not z's full mean
+        assert torch.allclose(item["z_mean"], z_mean_from_K), (
+            "z centering used the wrong vertices (possible information leakage)"
+        )

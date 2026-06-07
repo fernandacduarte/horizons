@@ -1,0 +1,125 @@
+"""Validation: compute loss and metrics over a held-out dataset.
+
+The validation function is deliberately separate from training so it
+can be reused for the test sets at the end of training, or for ad-hoc
+evaluation of a saved checkpoint.
+"""
+from __future__ import annotations
+
+import torch
+
+from horizons.data.dataset import HorizonDataset
+from horizons.training.rollout import rollout
+from horizons.training.loss import (
+    rollout_loss,
+    per_iteration_data_loss,
+)
+
+
+@torch.no_grad()
+def validate(
+    model: torch.nn.Module,
+    dataset: HorizonDataset,
+    lambda_f: float = 1.0,
+    lambda_p: float = 0.1,
+    lambda_c: float = 0.01,
+    lambda_r: float = 0.001,
+) -> dict:
+    """Compute mean validation loss and per-surface diagnostics.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        A LocalOperator (or compatible). Will be set to eval() mode.
+    dataset : HorizonDataset
+        The val (or test) dataset. Masks should be stable (split != 'train').
+
+    Returns
+    -------
+    dict with keys:
+      - "loss_total" : mean total loss across surfaces (float)
+      - "loss_data", "loss_curv", "loss_res" : mean component losses (floats)
+      - "rmse_centered" : mean RMSE on U in *centered* z units (float)
+      - "rmse_meters" : mean RMSE on U in original (uncentered) meters (float)
+      - "per_surface" : list of dicts, one per surface, with keys:
+          "surface_id", "reservoir_id", "regime", "N",
+          "loss_total", "rmse_centered", "rmse_meters"
+    """
+    was_training = model.training
+    model.eval()
+
+    n = len(dataset)
+    sum_total = 0.0
+    sum_data = 0.0
+    sum_curv = 0.0
+    sum_res = 0.0
+    sum_rmse_centered = 0.0
+    sum_rmse_meters = 0.0
+    per_surface: list[dict] = []
+
+    for idx in range(n):
+        item = dataset[idx]
+        z_true = item["z_true"]
+        z0 = item["z0"]
+        V_xy = item["V"][:, :2]
+        F = item["F"]
+        edge_index = item["edge_index"]
+        mask = item["mask"]
+        d = item["d"]
+        N = item["N"]
+
+        result = rollout(
+            model,
+            z0=z0, z_true=z_true,
+            V_xy=V_xy, F=F, edge_index=edge_index,
+            mask=mask, d=d, N=N,
+        )
+        loss_dict = rollout_loss(
+            z_trajectory=result.z_trajectory,
+            dz_trajectory=result.dz_trajectory,
+            z_true=z_true, d=d, edge_index=edge_index, mask=mask,
+            lambda_f=lambda_f, lambda_p=lambda_p,
+            lambda_c=lambda_c, lambda_r=lambda_r,
+        )
+
+        # Compute RMSE on U at final iteration, in centered units AND in meters.
+        # z_true and z_N are both centered (subtracted z_mean from item).
+        # Adding z_mean back gives original-units predictions.
+        z_final = result.z_trajectory[-1]
+        unknown = ~mask
+        err_centered = (z_final[unknown] - z_true[unknown])
+        rmse_centered = err_centered.pow(2).mean().sqrt().item()
+        # In meters: centering offsets are an additive constant that cancels
+        # in the difference, so RMSE is identical in either frame. We
+        # still report both for clarity.
+        rmse_meters = rmse_centered  # they're identical
+
+        sum_total += loss_dict["total"].item()
+        sum_data += loss_dict["data"].item()
+        sum_curv += loss_dict["curv"].item()
+        sum_res += loss_dict["res"].item()
+        sum_rmse_centered += rmse_centered
+        sum_rmse_meters += rmse_meters
+
+        per_surface.append({
+            "surface_id": item["surface_id"],
+            "reservoir_id": item["reservoir_id"],
+            "regime": item["regime"],
+            "N": N,
+            "loss_total": loss_dict["total"].item(),
+            "rmse_centered": rmse_centered,
+            "rmse_meters": rmse_meters,
+        })
+
+    if was_training:
+        model.train()
+
+    return {
+        "loss_total": sum_total / n,
+        "loss_data": sum_data / n,
+        "loss_curv": sum_curv / n,
+        "loss_res": sum_res / n,
+        "rmse_centered": sum_rmse_centered / n,
+        "rmse_meters": sum_rmse_meters / n,
+        "per_surface": per_surface,
+    }

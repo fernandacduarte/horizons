@@ -14,7 +14,6 @@ seed: 42
 data:
   surfaces_dir: data/surfaces        # processed mesh files live here
   split_file: data/splits/split_v1.json
-  device: mps                        # mps | cpu | cuda
 
 # --------------------------------------------------------
 # Mask sampler (Stage 2)
@@ -93,6 +92,8 @@ train:
   lr_schedule: cosine                # cosine | constant
   warmup_epochs: 5
   val_every: 1                       # epochs between validation passes
+  log_every_steps: 10                # print a status line every N optimizer steps
+  device: cpu                        # cpu | mps | cuda (training device)
 
   log_dir: outputs/tensorboard
   ckpt_dir: outputs/checkpoints

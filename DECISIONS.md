@@ -250,7 +250,14 @@ sort them and map to 0-indexed positions.
 the coordinate-system metadata because we use the raw coordinates as-is.
 Multiple `TFACE` blocks (if any) are treated as one mesh — the vertex
 index space is shared across them.
-**Status:** Fixed.
+**Status:** Fixed. (Bonus fix in Stage 8.1: `fit_mean_plane` now
+promotes to float64 internally for the least-squares solve. Float32
+mean/centering on UTM-scale coords loses enough precision that the
+centering trick alone wasn't sufficient — the dataset's per-surface
+centering path triggered the rank-deficient error. Float64 gives ~15
+digits of precision which is enough for any realistic coordinate
+system; the returned a, b, c are Python floats so callers see no
+dtype change.)
 
 ### D4.2 — Dataset filter: exclude pathological surfaces
 **Decision:** When converting `.ts` files into the dataset, exclude
@@ -378,8 +385,12 @@ in Stage 8.
 fully observed (no information leakage between K and U).
 **For z**: centering must use only z[K] since z[U] is what we're
 predicting; using z[U] would leak ground truth.
-**Status:** Open. Ad-hoc fix in overfit_real.py; formal implementation
-deferred to Stage 8.
+**Status:** Fixed in Stage 8.1. `HorizonDataset` now applies
+per-surface centering by default when `center_per_surface=True` (the
+default). `__getitem__` returns the centering offsets (`xy_mean`,
+`z_mean`) so downstream code can invert back to original units when
+reporting metrics. The ad-hoc fix in `overfit_real.py` remains as a
+working example but is no longer the only path.
 
 ---
 
