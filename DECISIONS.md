@@ -236,30 +236,150 @@ via the plane fit) so the anchoring is a no-op for `t=0`.
 
 ---
 
-## Stage 4 — Data split (deferred)
+## Stage 4 — Real data wiring
 
-### D4.1 — Defer the train/val/test split file (until after Stage 7)
-**Decision:** Do not create `data/splits/split_v1.json` until the GOCAD
-`.ts` loader exists and real surface data is available. Develop Stages
-5, 6, 7 against the three synthetic fixtures (`plane`, `sphere_cap`,
-`anticline`). Return to Stage 4 between Stages 7 and 8.
-**Where:** No code; this is a sequencing decision.
-**Why:** The split file requires real surface IDs and reservoir IDs.
-Stages 5–7 only need a single mesh to validate their machinery (the
-keystone overfit test is more diagnostic on a known fixture than on a
-real horizon). Stage 8 is the first stage where multi-surface
-train/val/test semantics matter, so that's the natural moment to wire
-in real data.
-**Plan when we get there:**
-  - 4A: write `HorizonSurface.from_ts(path)` parsing GOCAD TSurf format.
-  - 4B: one-time script converting all `.ts` files to `.npz` under
-    `data/surfaces/` with (surface_id, reservoir_id) metadata.
-  - 4C: stratified-by-reservoir 70/15/15 split written to
-    `data/splits/split_v1.json`.
-  - 4D: regenerate synthetic-fixture-like test fixtures from real-data
-    subsamples to replace the current synthetic anticline; the
-    convex-hull-boundary issue from D1.6 goes away naturally.
-**Status:** Open. Scheduled for completion between Stage 7 and Stage 8.
+### D4.1 — GOCAD `.ts` loader supports PVRTX/VRTX and TRGL
+**Decision:** `HorizonSurface.from_ts(path)` parses GOCAD TSurf-format
+files. Recognized records: `PVRTX <id> <x> <y> <z>` (also `VRTX` as a
+common variant) and `TRGL <i> <j> <k>`. All other records (headers,
+coordinate-system metadata, `TFACE` markers, `END`, etc.) are ignored.
+Vertex IDs from the file are 1-indexed and may be non-contiguous; we
+sort them and map to 0-indexed positions.
+**Where:** `HorizonSurface.from_ts` in `horizons/data/mesh.py`.
+**Why:** Minimal viable parser for the format. We don't need to interpret
+the coordinate-system metadata because we use the raw coordinates as-is.
+Multiple `TFACE` blocks (if any) are treated as one mesh — the vertex
+index space is shared across them.
+**Status:** Fixed.
+
+### D4.2 — Dataset filter: exclude pathological surfaces
+**Decision:** When converting `.ts` files into the dataset, exclude
+files matching any of these criteria:
+  - Euler characteristic ≠ 1 (non-manifold or multi-component meshes —
+    these are not horizons in the geometric sense the project expects).
+  - n_vertices < 500 (degenerate stubs).
+  - n_vertices > 50,000 (computationally unwieldy at present scale;
+    the very large meshes (max ~670k) would dominate per-step cost
+    and add huge variance across surfaces).
+**Where:** `scripts/build_dataset.py` (to be written in 4B).
+**Why:**
+- The audit revealed three non-manifold files (`Base.ts`, `FundoMar.ts`,
+  `Horizonte3_Base.ts`) and one degenerate stub (`01_fundo_mar.ts`,
+  V=4). These cannot be trained on meaningfully.
+- The big meshes (V > 50k) are out-of-distribution in size; about 7
+  files would be excluded by this threshold.
+**Future work (explicit user request):** the V > 50k cutoff is
+configurable. After the main training pipeline works, the user wants to
+re-run including these files to test whether the model handles them
+well. Plan to expose `data.max_vertices` in the config so the threshold
+can be raised or removed via Hydra override.
+**Actual outcome on the dataset:** 17 of 64 files were excluded:
+  - 3 non-manifold (`Base.ts`, `FundoMar.ts`, `Horizonte3_Base.ts`)
+  - 4 degenerate stubs with V=4 (the R1 lowercase_underscore files —
+    after this filter, R1 is empty and R3 has only 1 surviving file;
+    these are documentation, not bugs)
+  - 10 files with V > 50k, all from the R3 (concatenated naming)
+    pattern: stratigraphic markers from a Brazilian basin
+    (`01FundoMar`, `02TopoMioceno`, ..., `17TopoAndarJiquia`,
+    `18TopoEmbasamento`) at 110k-670k vertices. These form a
+    coherent batch of high-resolution interpretation-grade data
+    likely from a single 3D seismic project. They're the strongest
+    candidates for a follow-up experiment.
+**Net dataset:** 47 surfaces across 6 effectively-populated reservoir
+groups (R2 has 18, R5 has 10, R6 has 6, R4 has 5, R7 has 5, R8 has 2;
+R1 and R3 are essentially empty). The natural gap in the size
+distribution at ~50k (kept files top out at 48k; dropped files
+start at 110k) means the threshold sits on a real distributional
+break, not a judgment call.
+**Status:** Fixed for the initial training run. Threshold to be
+revisited (Stage 12 or later).
+
+### D4.3 — Normalize z-sign convention: all-positive (depth)
+**Decision:** Files whose z-values are entirely negative get their
+z-coordinate sign flipped at load time, so the dataset is uniformly
+depth-positive.
+**Where:** `scripts/build_dataset.py`. Implemented as a preprocessing
+step before the surface is saved to `.npz`.
+**Why:** The audit revealed 53 files with depth-positive z (the
+majority and the standard GOCAD `ZPOSITIVE Depth` convention) vs. 11
+files with elevation-negative z. Mixing both conventions in training
+would force the model to learn a bimodal z distribution for no
+geological reason. Flipping the minority to match the majority unifies
+the input distribution.
+**Note:** We flip based on the *empirical* sign of z, not by parsing
+`ZPOSITIVE Depth` vs `ZPOSITIVE Elevation` headers. This is simpler and
+robust to files that lack the header. Files with z crossing zero
+(genuinely mixed signs) would need special handling, but the audit
+showed zero such files in the dataset.
+**Status:** Fixed.
+
+### D4.4 — Reservoir groups inferred from filename style
+**Decision:** Surfaces are grouped into one of 8 "reservoir" categories
+based on filename pattern (R1 through R8):
+  - R1 = `NN_lowercase_name.ts` (e.g. `01_fundo_mar.ts`)
+  - R2 = `NN_CamelName.ts` (e.g. `01_Topo.ts`, `02_Horizonte1.ts`)
+  - R3 = `NNCamelName.ts` (e.g. `01FundoMar.ts`, `15TopoSal.ts`)
+  - R4 = `Horizonte<N>[_Suffix].ts`
+  - R5 = `TestHorizon<N>.ts`
+  - R6 = `horizonte<N>[-utm].ts` (lowercase h)
+  - R7 = `Horizon<N>-OutSpace.ts`
+  - R8 = standalone files (`Base.ts`, `FundoMar.ts`, etc. — fallback)
+**Where:** Classification function in `scripts/build_dataset.py`.
+**Why:** The dataset has no proper reservoir metadata; filename style
+is our best proxy. These groups likely reflect different processing
+batches, different software, or different data sources rather than
+distinct geological reservoirs. We are explicitly aware this is an
+imperfect grouping.
+**Status:** Fixed for split v1. May need revision if filename
+classification turns out to misgroup specific files.
+
+### D4.5 — Two test sets: in-distribution (Test-ID) and out-of-distribution (Test-OOD)
+**Decision:** The split has four parts:
+  - **train** (70% of non-R7 surfaces, stratified per group)
+  - **val** (15% of non-R7 surfaces, stratified per group)
+  - **test_id** (15% of non-R7 surfaces, stratified per group)
+  - **test_ood** (all of R7 — `Horizon<N>-OutSpace.ts`, ~5 surfaces)
+**Where:** `data/splits/split_v1.json` (to be written in 4C).
+**Why:** Two test sets serve different purposes:
+- **Test-ID** gives a stable headline RMSE with reasonable sample size
+  (~10 surfaces). Used for the main results table.
+- **Test-OOD** holds out an entire group the model has never seen,
+  testing genuine cross-group generalization. Used for the
+  generalization claim.
+R7 was chosen because the name `OutSpace` suggests these surfaces were
+intended for extrapolation/out-of-distribution testing, and the group
+has 5 surfaces — small enough to lose for training, big enough to
+yield a meaningful (if noisy) test estimate.
+**Status:** Fixed.
+
+### D4.6 — Per-surface (x, y, z) centering deferred to Stage 8
+**Decision:** Per-surface centering of x, y, and z is NOT applied at
+data-load time. It will be applied inside the dataset / training loop
+in Stage 8. The overfit_real.py script applies it ad-hoc to demonstrate
+end-of-Stage-4 proof of life.
+**Where:** Future work in `horizons/data/dataset.py`. Currently lives in
+`scripts/overfit_real.py` as a temporary measure.
+**Why:** Raw coordinates across the dataset are wildly large:
+  - UTM x coordinates can be ~3.5e5
+  - UTM y coordinates can be ~7.5e6
+  - z (depth) can be 0 to 6000 m, different per surface
+Feeding these directly to the GNN's input projection causes float32
+precision loss and unstable training. The overfit experiment on
+01_Topo demonstrated this concretely: without centering, the loss
+curve was chaotic with order-of-magnitude jumps; with per-surface
+(x, y, z) centering applied, the loss curves became smooth and the
+final RMSE dropped by 2x (~17m → ~9m).
+The fix for `fit_mean_plane` (D4.1) handles the precision issue
+during initialization but does not propagate to the model's input
+features — the model still sees raw coordinates in its 9-feature
+vector. The proper fix is to center per-surface in the dataset class
+in Stage 8.
+**For x and y**: centering can use the full (x, y) since they're
+fully observed (no information leakage between K and U).
+**For z**: centering must use only z[K] since z[U] is what we're
+predicting; using z[U] would leak ground truth.
+**Status:** Open. Ad-hoc fix in overfit_real.py; formal implementation
+deferred to Stage 8.
 
 ---
 

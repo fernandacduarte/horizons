@@ -38,18 +38,17 @@ def fit_mean_plane(
     if xy_K.shape[0] < 3:
         raise ValueError(f"Need at least 3 known points; got {xy_K.shape[0]}")
 
-    # Design matrix [x, y, 1]
+    # Center x, y before solving. Real-world geospatial coordinates can have
+    # very large absolute values (e.g. UTM eastings ~1e5, northings ~1e7);
+    # building the design matrix on raw values causes float32 precision loss
+    # and a spurious rank-deficient result. We solve in the centered frame
+    # and convert the intercept back at the end.
+    xy_mean = xy_K.mean(dim=0)                                        # (2,)
+    xy_centered = xy_K - xy_mean                                       # (n_known, 2)
     ones = torch.ones(xy_K.shape[0], 1, dtype=xy_K.dtype)
-    X = torch.cat([xy_K, ones], dim=1)  # (n_known, 3)
+    X = torch.cat([xy_centered, ones], dim=1)                          # (n_known, 3)
 
-    # Solve X @ coeffs = z_K in the least-squares sense.
-    # This is more numerically stable than forming inverse(X_K.T @ X_K).
-    # lstsq is the numerically stable way; it handles rank-deficiency via SVD.
-    solution = torch.linalg.lstsq(X, z_K.unsqueeze(1))
-    coeffs = solution.solution.squeeze(1)  # (3,)
-
-    # Sanity: check the fit isn't catastrophically singular. If the points are
-    # collinear, lstsq still returns a solution but it's not meaningful.
+    # Rank check on the centered matrix is numerically reliable.
     rank = int(torch.linalg.matrix_rank(X).item())
     if rank < 3:
         raise ValueError(
@@ -57,7 +56,18 @@ def fit_mean_plane(
             f"cannot fit a unique plane."
         )
 
-    a, b, c = coeffs.tolist()
+    # Least-squares solve on centered coordinates. lstsq handles the full-rank
+    # case correctly; we already checked rank > 2 above.
+    solution = torch.linalg.lstsq(X, z_K.unsqueeze(1))
+    coeffs = solution.solution.squeeze(1)                              # (3,)
+    a_c, b_c, c_centered = coeffs.tolist()
+
+    # Convert back to the original (uncentered) frame:
+    #   z = a*x + b*y + c  where  c = c_centered - a*x_mean - b*y_mean
+    a, b = a_c, b_c
+    x_mean, y_mean = xy_mean.tolist()
+    c = c_centered - a * x_mean - b * y_mean
+
     return a, b, c
 
 

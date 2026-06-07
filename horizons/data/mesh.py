@@ -94,6 +94,107 @@ class HorizonSurface:
             reservoir_id=reservoir_id,
         )
 
+    @classmethod
+    def from_ts(
+        cls,
+        path: str | Path,
+        surface_id: Optional[str] = None,
+        reservoir_id: Optional[str] = None,
+    ) -> "HorizonSurface":
+        """Load a HorizonSurface from a GOCAD TSurf (.ts) file.
+
+        Parses lines of the form:
+            PVRTX <id> <x> <y> <z>
+            TRGL <i> <j> <k>
+        Vertex IDs in the file are 1-indexed; we convert to 0-indexed.
+
+        Other content (headers, coordinate-system metadata, TFACE markers,
+        and any other GOCAD record types) is ignored. If the file contains
+        multiple TFACE blocks, all their triangles are treated as belonging
+        to one mesh — they share the same vertex index space.
+
+        Convention note: GOCAD files typically use ZPOSITIVE Depth (z
+        increases downward). We preserve the original sign — the model
+        treats z as opaque and doesn't care which way is "up", but the
+        convention must be consistent across the dataset.
+        """
+        path = Path(path)
+
+        # Parse the file
+        vertices: dict[int, tuple[float, float, float]] = {}
+        triangles: list[tuple[int, int, int]] = []
+
+        with open(path, "r") as f:
+            for line in f:
+                tokens = line.split()
+                if not tokens:
+                    continue
+                head = tokens[0]
+                if head in ("PVRTX", "VRTX"):
+                    # VRTX is sometimes used in place of PVRTX
+                    # Format: <id> <x> <y> <z> [properties...]
+                    if len(tokens) < 5:
+                        continue
+                    try:
+                        vid = int(tokens[1])
+                        x, y, z = float(tokens[2]), float(tokens[3]), float(tokens[4])
+                    except ValueError:
+                        continue
+                    vertices[vid] = (x, y, z)
+                elif head == "TRGL":
+                    if len(tokens) < 4:
+                        continue
+                    try:
+                        i, j, k = int(tokens[1]), int(tokens[2]), int(tokens[3])
+                    except ValueError:
+                        continue
+                    triangles.append((i, j, k))
+                # All other lines (HEADER, TFACE, COORDINATE_SYSTEM, END, etc.) ignored
+
+        if not vertices:
+            raise ValueError(f"No PVRTX records found in {path}")
+        if not triangles:
+            raise ValueError(f"No TRGL records found in {path}")
+
+        # GOCAD vertex IDs are 1-indexed and may be non-contiguous. Build a
+        # mapping from GOCAD ID -> 0-indexed position so triangle indices
+        # are valid in our 0-indexed array.
+        sorted_ids = sorted(vertices.keys())
+        gocad_to_idx = {gid: i for i, gid in enumerate(sorted_ids)}
+
+        # Validate: every triangle vertex must exist in `vertices`
+        for tri in triangles:
+            for vid in tri:
+                if vid not in vertices:
+                    raise ValueError(
+                        f"Triangle references missing vertex {vid} in {path}"
+                    )
+
+        # Build V and F arrays
+        V_np = np.array(
+            [vertices[gid] for gid in sorted_ids], dtype=np.float64
+        )
+        F_np = np.array(
+            [[gocad_to_idx[i], gocad_to_idx[j], gocad_to_idx[k]]
+             for i, j, k in triangles],
+            dtype=np.int64,
+        )
+
+        V = torch.from_numpy(V_np).to(torch.float32)
+        F = torch.from_numpy(F_np).to(torch.int64)
+        edge_index = build_edge_index(F)
+
+        if surface_id is None:
+            surface_id = path.stem
+
+        return cls(
+            V=V,
+            F=F,
+            edge_index=edge_index,
+            surface_id=surface_id,
+            reservoir_id=reservoir_id,
+        )
+
 
 def build_edge_index(F: torch.Tensor) -> torch.Tensor:
     """Build a PyG-style bidirectional edge_index from a face array.
