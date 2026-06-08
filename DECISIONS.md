@@ -661,6 +661,90 @@ vs. training with data-only is a natural ablation.
 
 ---
 
+## Stage 8 — Training loop
+
+### D8.1 — Training loop structure: shuffle, NaN skip, per-epoch metrics, dataclass state
+**Decision:** Several structural choices in `horizons/training/loop.py::train()`:
+
+1. **Train order is shuffled each epoch with a fixed-seed RNG.** A
+   `random.Random(seed)` instance is created once at the start of
+   training and used to shuffle the surface order at the top of each
+   epoch. Same seed → same shuffle pattern across runs.
+2. **NaN losses are skipped, not fatal.** If a training step produces
+   a non-finite total loss, the loop logs a warning, increments the
+   step counter, and continues to the next surface. The optimizer is
+   not stepped for that surface.
+3. **Per-epoch metrics in history, not per-step.** `state.train_history`
+   accumulates one dict per epoch with mean loss across all successful
+   steps in that epoch. Per-step losses are printed to stdout but not
+   stored or logged to TensorBoard (see O2 for why).
+4. **TrainState as a dataclass** holds: current epoch/step, best-val
+   tracking, full train_history and val_history lists. Returned to the
+   caller so they can serialize, plot, or analyze the run after the
+   loop finishes.
+
+**Where:** `horizons/training/loop.py`.
+
+**Why:**
+1. **Shuffling** prevents the model from learning surface-order
+   artifacts; **fixed seed** keeps runs reproducible. Train masks
+   already vary per epoch (D5.2), so shuffling adds independent
+   variation that helps generalization.
+2. **NaN-skip** beats crashing: a single pathological surface
+   shouldn't abort a 100-epoch run. The warning makes it visible in
+   logs so we can investigate later. If NaN persists across surfaces,
+   that's a different problem (LR too high, etc.) that will surface
+   anyway.
+3. **Per-epoch granularity** matches what's meaningful for human
+   interpretation; the per-step view is too noisy (see O2).
+4. **Dataclass state** is cleaner than threading 5+ tuples through
+   the loop or stashing things on `self`.
+
+**Status:** Fixed.
+
+### D8.2 — TensorBoard logging scope
+**Decision:** TensorBoard logs:
+- `train/loss_total`, `train/loss_data`, `train/loss_curv`,
+  `train/loss_res` (per-epoch means).
+- `train/lr` (current learning rate, per-epoch).
+- `val/loss_total`, `val/loss_data`, `val/loss_curv`, `val/loss_res`
+  (means over val set, on val epochs).
+- `val/rmse_meters` (mean RMSE on U across val set, on val epochs).
+- `val_rmse_per_surface/<surface_id>` — RMSE for each val surface.
+- `val_rmse_per_reservoir/<reservoir_id>` — mean RMSE within each
+  reservoir group represented in val.
+
+Things explicitly NOT logged:
+- Per-step train loss (too noisy, see O2).
+- Gradient norms or weight statistics.
+- Activations or intermediate feature distributions.
+
+**Where:** `horizons/training/loop.py`, the conditional `if writer
+is not None` blocks at end of train epoch and end of val epoch.
+
+**Why:**
+- **Per-surface RMSE** lets us see *which* surfaces are hard. Without
+  it, an aggregate val RMSE could hide that 1 of 7 surfaces is
+  catastrophically bad. The 8.3 smoke run already showed RMSE
+  varying 30× across surfaces (43m to 1556m on the same epoch).
+- **Per-reservoir means** group the surfaces into the categories from
+  D4.4, letting us see if some reservoirs systematically underperform.
+- **Per-epoch granularity** for train metrics — see O2 for why per-step
+  is unusable.
+- **Gradient/weight/activation logging** is for debugging specific
+  issues, not for normal monitoring. We can add later if needed.
+
+**Run directory naming:** `outputs/tensorboard/run_<YYYYMMDD_HHMMSS>/`.
+Each run also writes `config.yaml` (snapshot of the Hydra config used)
+and `summary.json` (best-val and top-line numbers) alongside the
+events file. This lets us answer "what hyperparameters produced this
+curve?" weeks later without git archaeology.
+
+**Status:** Fixed for Stage 8. Will add gradient-norm logging in
+Stage 8.5 if LR scheduling needs debugging.
+
+---
+
 ## Future / open decisions
 
 These are decisions we know we need to make but haven't yet, or

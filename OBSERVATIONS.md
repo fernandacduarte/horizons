@@ -93,6 +93,86 @@ not an artifact of any particular setting.
 
 ---
 
+## O2 — Per-step training loss spans ~6 orders of magnitude across surfaces
+
+**Observed in:** Stage 8.3 (first multi-surface training run, 3 epochs
+on the 30 train surfaces).
+
+**What we see:** Within a single epoch, the per-step training loss
+(printed to stdout at every 10th step) ranges from O(1) to O(10⁷):
+ep 0  step  0   TestHorizon1     N=10  loss=227051
+ep 0  step 10   08_BaseAlagoas   N=48  loss=52232504    <- 4 orders larger
+ep 0  step 20   Horizonte3       N=31  loss=30794      <- back down
+ep 2  step 50   horizonte3-utm   N=9   loss=36         <- 6 orders smaller!
+
+This is *not* an instability problem. Adjacent steps update the same
+model with very different surfaces, and each surface produces a loss
+on its own scale.
+
+**Why this happens:**
+
+The data-loss component is a mean of squared (z - z_true) over
+$F_t \cup P_t$, scaled by $\lambda_f$ and $\lambda_p$. The
+magnitude depends on three things, all of which vary wildly across
+the dataset:
+
+1. **Mesh size** (|V| from ~2,400 to 48,000). Larger meshes have
+   larger $|U|$, but since we use *mean* (D5.7), this doesn't
+   directly scale the loss. However, larger meshes tend to have
+   higher $N$ (longer rollouts), so the cumulative effect through
+   the rollout sum still varies.
+2. **Rollout depth $N$** (from 7 to 53+). The rollout loss sums
+   per-iteration losses over $N$ iterations, so deeper rollouts
+   accumulate more total loss.
+3. **z magnitude (after centering)**. Even with per-surface
+   centering (D4.6), the residual variance of $z$ within a surface
+   varies hugely. A flat horizon spans a few meters; a folded one
+   spans hundreds. Squared error scales with the square of $z$ range.
+
+For example: surface `08_BaseAlagoas` (|V|≈48k, N=48) has both a
+large mesh and a deep rollout, producing loss ~5e7. Surface
+`horizonte3-utm` (|V|≈2k, N=9) has neither, producing loss ~36.
+
+**Implications:**
+
+1. **Per-step training loss is not a useful monitoring signal.** Its
+   value depends as much on *which surface* the step was on as on
+   *how well the model is doing*. Two consecutive steps showing
+   loss=50M and loss=50 don't indicate divergence — they indicate
+   the second step happened on a smaller, easier surface.
+
+2. **Per-epoch mean is the right granularity.** Averaging over all
+   30 surfaces in an epoch smooths out the surface-to-surface
+   variance and gives a meaningful trajectory. This is what we log
+   to TensorBoard (D8.2).
+
+3. **Val RMSE in meters is the most interpretable single metric.**
+   Loss is scale-dependent; RMSE in physical units (meters of
+   z-error on unknown vertices) is comparable across surfaces and
+   reservoirs.
+
+4. **Aggregate train loss is dominated by the largest/deepest
+   surfaces.** Mean loss across 30 surfaces is mathematically a mean,
+   but functionally a few surfaces with loss ~1e7 swamp 25 surfaces
+   with loss ~1e2. We may want to log a *geometric* mean or median
+   in addition to the arithmetic mean, to keep the small surfaces
+   visible.
+
+**A note on whether this is a problem to fix:**
+
+Not necessarily. The model is supposed to do well on all surfaces,
+not just balance loss magnitudes equally. The optimization signal
+from a high-loss surface is legitimately stronger than from a
+low-loss surface — that surface needs more learning. The arithmetic
+mean is the right thing for the optimizer to follow.
+
+The thing to watch is per-surface val RMSE (logged to TensorBoard
+in tags like `val_rmse_per_surface/05_TopoCretaceo`). If after many
+epochs of training a few specific surfaces remain at high RMSE
+while most have converged, *that* is a problem worth investigating.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:
