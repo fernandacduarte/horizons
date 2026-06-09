@@ -5,13 +5,74 @@ import math
 import random
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import torch
+
+from torch.utils.tensorboard import SummaryWriter
 
 from horizons.data.dataset import HorizonDataset
 from horizons.eval.validate import validate
 from horizons.training.rollout import rollout
 from horizons.training.loss import rollout_loss
+
+
+def compute_lr(
+    epoch: int,
+    *,
+    lr_max: float,
+    lr_min: float,
+    warmup_epochs: int,
+    n_epochs: int,
+    schedule: str = "cosine",
+) -> float:
+    """Compute the learning rate for a given epoch.
+
+    For schedule="cosine":
+        - epochs [0, warmup_epochs): linear ramp from lr_min to lr_max
+        - epochs [warmup_epochs, n_epochs): half-cosine decay from lr_max to lr_min
+
+    For schedule="constant":
+        - LR is always lr_max (warmup is ignored)
+
+    Parameters
+    ----------
+    epoch : int
+        Current epoch index (0-based).
+    lr_max : float
+        Peak LR (the LR at the end of warmup, before decay starts).
+    lr_min : float
+        Floor LR (the LR at the start of warmup and at the end of decay).
+    warmup_epochs : int
+        Number of warmup epochs.
+    n_epochs : int
+        Total epochs in the run.
+    schedule : str
+        "cosine" or "constant".
+    """
+    if schedule == "constant":
+        return lr_max
+
+    if schedule != "cosine":
+        raise ValueError(
+            f"Unknown schedule {schedule!r}; expected 'cosine' or 'constant'"
+        )
+
+    if epoch < warmup_epochs:
+        # Linear ramp from lr_min to lr_max over warmup_epochs steps.
+        # At epoch=0 we get lr_min; at epoch=warmup_epochs-1 we get
+        # close to lr_max (one step shy); the lr_max is hit at warmup_epochs.
+        if warmup_epochs <= 0:
+            return lr_max
+        frac = (epoch + 1) / warmup_epochs
+        return lr_min + (lr_max - lr_min) * frac
+
+    # Cosine decay from lr_max at epoch=warmup_epochs to lr_min at epoch=n_epochs-1.
+    decay_epochs = max(1, n_epochs - warmup_epochs - 1)
+    progress = (epoch - warmup_epochs) / decay_epochs
+    progress = min(max(progress, 0.0), 1.0)
+    cos = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return lr_min + (lr_max - lr_min) * cos
 
 
 @dataclass
@@ -23,6 +84,8 @@ class TrainState:
     best_val_epoch: int = -1
     train_history: list[dict] = field(default_factory=list)
     val_history: list[dict] = field(default_factory=list)
+    early_stopped: bool = False
+    early_stop_reason: str | None = None
 
 
 def train(
@@ -43,6 +106,12 @@ def train(
     device: str | torch.device = "cpu",
     seed: int = 42,
     verbose: bool = True,
+    writer: SummaryWriter | None = None,
+    lr_min: float = 1e-5,
+    warmup_epochs: int = 5,
+    lr_schedule: str = "cosine",
+    patience: int | None = None,
+    checkpoint_path: str | Path | None = None,
 ) -> TrainState:
     """Train a horizon-extrapolation model.
 
@@ -102,6 +171,17 @@ def train(
     for epoch in range(n_epochs):
         state.epoch = epoch
         train_dataset.set_epoch(epoch)
+
+        # Update LR according to schedule. We set the param_group lr
+        # before the first optimizer.step() of this epoch, so all steps
+        # in the epoch use the same LR.
+        current_lr = compute_lr(
+            epoch, lr_max=lr, lr_min=lr_min,
+            warmup_epochs=warmup_epochs,
+            n_epochs=n_epochs, schedule=lr_schedule,
+        )
+        for pg in optimizer.param_groups:
+            pg["lr"] = current_lr
 
         # Shuffle the order of train surfaces this epoch
         order = list(range(n_train))
@@ -188,6 +268,14 @@ def train(
         }
         state.train_history.append(train_record)
 
+        # TensorBoard: per-epoch train metrics
+        if writer is not None:
+            writer.add_scalar("train/loss_total", train_record["loss_total"], epoch)
+            writer.add_scalar("train/loss_data", train_record["loss_data"], epoch)
+            writer.add_scalar("train/loss_curv", train_record["loss_curv"], epoch)
+            writer.add_scalar("train/loss_res", train_record["loss_res"], epoch)
+            writer.add_scalar("train/lr", optimizer.param_groups[0]["lr"], epoch)
+
         # Validation
         is_last_epoch = epoch == n_epochs - 1
         if (epoch + 1) % val_every == 0 or is_last_epoch:
@@ -207,9 +295,66 @@ def train(
             }
             state.val_history.append(val_record)
 
-            if val_record["loss_total"] < state.best_val_loss:
+            is_new_best = val_record["loss_total"] < state.best_val_loss
+            if is_new_best:
                 state.best_val_loss = val_record["loss_total"]
                 state.best_val_epoch = epoch
+                # Save best checkpoint
+                if checkpoint_path is not None:
+                    checkpoint = {
+                        "model_state": model.state_dict(),
+                        "optimizer_state": optimizer.state_dict(),
+                        "epoch": epoch,
+                        "step": state.step,
+                        "best_val_loss": state.best_val_loss,
+                        "train_history": state.train_history,
+                        "val_history": state.val_history,
+                    }
+                    Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
+                    torch.save(checkpoint, checkpoint_path)
+                    if verbose:
+                        print(f"  saved checkpoint: {checkpoint_path}")
+
+            # TensorBoard: validation metrics
+            if writer is not None:
+                writer.add_scalar("val/loss_total", val_record["loss_total"], epoch)
+                writer.add_scalar("val/loss_data", val_record["loss_data"], epoch)
+                writer.add_scalar("val/loss_curv", val_record["loss_curv"], epoch)
+                writer.add_scalar("val/loss_res", val_record["loss_res"], epoch)
+                writer.add_scalar("val/rmse_meters", val_record["rmse_meters"], epoch)
+                # Per-surface RMSE (lets us see which surfaces are hard)
+                for s in val_record["per_surface"]:
+                    writer.add_scalar(
+                        f"val_rmse_per_surface/{s['surface_id']}",
+                        s["rmse_meters"], epoch,
+                    )
+                # Per-reservoir mean RMSE
+                by_reservoir: dict[str, list[float]] = {}
+                for s in val_record["per_surface"]:
+                    rid = s["reservoir_id"] or "unknown"
+                    by_reservoir.setdefault(rid, []).append(s["rmse_meters"])
+                for rid, rmses in by_reservoir.items():
+                    writer.add_scalar(
+                        f"val_rmse_per_reservoir/{rid}",
+                        sum(rmses) / len(rmses), epoch,
+                    )
+
+            # Early stopping check: if patience epochs have passed since
+            # the last best val loss, stop. Patience is measured in EPOCHS
+            # (not val checks), so val_every interacts with it: if
+            # val_every=5 and patience=30, we get ~6 val checks before
+            # giving up.
+            if patience is not None and patience > 0:
+                epochs_since_best = epoch - state.best_val_epoch
+                if epochs_since_best >= patience:
+                    state.early_stopped = True
+                    state.early_stop_reason = (
+                        f"no val loss improvement for {epochs_since_best} "
+                        f"epochs (patience={patience})"
+                    )
+                    if verbose:
+                        print(f"\n  EARLY STOP: {state.early_stop_reason}")
+                    break
 
             if verbose:
                 t_elapsed = time.time() - t_start

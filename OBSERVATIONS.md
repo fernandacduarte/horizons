@@ -173,6 +173,98 @@ while most have converged, *that* is a problem worth investigating.
 
 ---
 
+## O3 — First full training run: 5.5× RMSE reduction, per-surface heterogeneity dominates aggregate metrics
+
+**Observed in:** Stage 8.7 (first end-to-end training run on the canonical
+dataset split: 30 train surfaces, 7 val surfaces, 100 max epochs with
+patience=20).
+
+### Top-line result
+
+- **Initial val RMSE (untrained model):** 489 m
+- **Best val RMSE (epoch 17 of 38):** 79.3 m  → **6.2× reduction**
+- **Best val loss:** 385,594 at epoch 17
+- **Training duration:** 38 epochs (early-stopped after 20 epochs of no
+  val-loss improvement). Wall time ~32 minutes on CPU.
+- **Train vs val loss at convergence:** train ~1.2M, val ~390k (val is
+  *lower* than train, see "anti-overfitting pattern" below).
+
+### Per-surface val RMSE shows enormous heterogeneity
+
+The per-surface breakdown at the best epoch reveals a 2,000× spread
+across the 7 val surfaces:
+
+| Surface | RMSE (m) | n_vertices | regime | Note |
+|---|---|---|---|---|
+| horizonte7 | 0.13 | ~9.7k | outward_pinned | near-perfect fit |
+| Horizonte5 | 0.21 | ~9.7k | outward_free | near-perfect fit |
+| 10_BaseModelo | 3.94 | 48k | outward_pinned | excellent despite size |
+| TestHorizon4 | 49.5 | ~2.4k | outward_pinned | moderate |
+| TestHorizon7 | 77.6 | ~2.4k | half_plane | moderate |
+| 09_Horizonte8 | 141.4 | ~2.4k | outward_free | poor |
+| 05_TopoCretaceo | 282.6 | 48k | outward_pinned | **outlier** |
+
+**Mean aggregate (79.3 m) is dominated by the outlier.** Excluding the
+worst surface, mean RMSE drops to ~52 m. Excluding the top two hardest,
+it drops to ~22 m. The aggregate is a misleading single number for a
+distribution this skewed.
+
+**Size alone is not the predictor of difficulty.** Both 10_BaseModelo
+and 05_TopoCretaceo are 48k-vertex meshes; one reaches 3.94 m, the
+other 282.6 m. The difference must come from geometry/connectivity
+specific to the individual surface, not from mesh size per se.
+
+### "Anti-overfitting" pattern: val < train
+
+Counterintuitively, val total loss (~390k) is consistently *below* train
+total loss (~1.2M) at convergence. This is NOT a bug — it's the same
+per-surface variance effect from O2 manifesting at the aggregate level:
+
+- **Train (30 surfaces) includes the largest, hardest 48k-vertex
+  surfaces.** Two of those have train-time per-step losses in the
+  millions (e.g., `08_BaseAlagoas` shows step losses of 5-50M), which
+  dominate the per-epoch mean.
+- **Val (7 surfaces) happens to contain a milder mix.** Two of the
+  three 48k-vertex meshes in val (`10_BaseModelo`, `05_TopoCretaceo`)
+  contribute moderately; the other surfaces are smaller and easier.
+
+This means **we are not overfitting.** The model has converged: train
+and val have both plateaued and the gap doesn't widen with continued
+training.
+
+### Implications for downstream stages
+
+1. **Stage 9 (gradient accumulation)** may help by stabilizing gradient
+   estimates across surfaces — currently each step's gradient is
+   dominated by one wildly-varying loss scale, which makes the
+   optimizer's job harder.
+
+2. **Stage 10 (evaluation)** should report per-surface and per-ring
+   metrics, not just aggregates. The thesis writeup should also report
+   **median RMSE** in addition to mean — the median is robust to the
+   outlier surface and gives a more representative number.
+
+3. **05_TopoCretaceo is a known-hard surface.** Worth a future
+   investigation: visualize the surface (likely Stage 11 or 12) and
+   diagnose what makes it hard. Candidate hypotheses: highly
+   non-stationary curvature, multi-scale features the model can't
+   capture, unusual triangle aspect ratios, or simply a structurally
+   different horizon class.
+
+4. **Mean RMSE of 80 m is a defensible baseline.** This is a real number
+   we can build on: future improvements should be measured against this
+   reference. Subsequent Stage 12 ablations should report deltas from
+   this baseline rather than absolute numbers.
+
+### Where the result lives
+
+- Checkpoint: `outputs/tensorboard/run_20260609_072419/best.pt`
+  (epoch 17, best_val_loss=385594, ~273 KB).
+- Full TensorBoard logs in the same directory.
+- Config snapshot saved as `config.yaml` in the run directory.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:

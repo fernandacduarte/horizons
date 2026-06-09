@@ -78,7 +78,8 @@ loss:
 # --------------------------------------------------------
 optim:
   type: adamw
-  lr: 1.0e-3
+  lr: 1.0e-3                         # peak LR after warmup
+  lr_min: 1.0e-5                     # floor LR at end of cosine decay (= 1% of peak)
   weight_decay: 1.0e-4
   grad_clip_norm: 1.0
   accum_steps: 4                     # effective batch size = accum_steps
