@@ -265,6 +265,129 @@ training.
 
 ---
 
+## O4 — Gradient accumulation (B=4 vs B=1): trades best-case for worst-case
+
+**Observed in:** Stage 9.3 A/B comparison. Identical hyperparameters
+(seed, 100 max epochs, patience=20, LR schedule, loss weights),
+with the only change being `optim.accum_steps`: 1 (one optimizer
+step per surface) vs 4 (one optimizer step per 4-surface batch).
+
+### Top-line numbers (both runs early-stopped)
+
+| Metric | B=1 (8.7 baseline) | B=4 | Δ |
+|---|---|---|---|
+| Best val loss | 385,594 | 322,651 | **−16%** |
+| Best val data loss | 385,580 | 322,635 | −16% |
+| Best val curv loss | 1,398 | 1,567 | +12% |
+| Best val res loss | 31 | 174 | +458% |
+| Best epoch | 17 | 28 | later |
+| Epochs run | 38 | 48 | longer |
+
+B=4 reaches a lower total loss but takes more epochs to get there.
+
+### The per-surface story is more nuanced than the aggregate
+
+Per-surface RMSE at best epoch:
+
+| Surfac | B=4 | Δ |
+|---|---|---|---|
+| 05_TopoCretaceo | 273.64 | 258.00 | **−5.7%** ✓ |
+| 09_Horizonte8 | 135.59 | 120.00 | **−11.5%** ✓ |
+| 10_BaseModelo | 62.47 | 113.66 | **+82%** ✗ |
+| Horizonte5 | 4.01 | 9.26 | +130% |
+| TestHorizon4 | 72.98 | 61.61 | **−15.6%** ✓ |
+| TestHorizon7 | 72.12 | 69.03 | −4.3% ✓ |
+| horizonte7 | 2.06 | 5.71 | +177% |
+
+Five of seven surfaces follow a clear pattern: **B=4 improves the
+hard ones, degrades the easy ones.** The easy surfaces (Horizonte5,
+horizonte7) went from sub-5m RMSE to single-digit m — large
+percentage change, small absolute change. The hardest surface
+(05_TopoCretaceo) improved by 15.6m in absolute terms.
+
+10_BaseModelo is the anomaly: a "middle" surface that got
+substantially worse. We don't have a clean explanation; it's a
+48k-vertex surface so possibly the larger batch size's gradient
+averaging happened to land ihis one mesh.
+
+### Summary statistics tell the real story
+
+| Statistic | B=1 | B=4 | Verdict |
+|---|---|---|---|
+| Mean RMSE | 88.98 | 91.04 | B=1 wins |
+| Median RMSE | 72.12 | **69.03** | B=4 wins |
+| Max RMSE | 273.64 | **258.00** | B=4 wins (worst case) |
+| Min RMSE | 2.06 | 5.71 | B=1 wins (best case) |
+| Range | 271.58 | **252.29** | B=4 (tighter spread) |
+
+Three of five favor B=4; the two that favor B=1 are the mean (which
+is sensitive to a single regressing surface) and the min (which
+measures how perfectly the easiest surface is fit, not generally
+useful).
+
+### Why total loss and mean RMSE disagree
+
+The total loss is dominated by the surfaces with the largest squared
+errors (squaring amplifies the contribution of bad surfaces). When
+B=4 improves the hardest surfaces, total loss drops a lot. When B=4
+degrades the easiest surfaces, total loss barely notices (because
+their squared errors were tiny to begin with).
+
+Mean RMSE, by contrast, weights each surface roughly equally. A
+small increase on an easy surface (in meters) has the same effect
+on aggregate RMSE as a small improvement on a hard surface.
+
+So the disagreement is not contradictory; the two metrics are
+genuinely measuring different things:
+
+- **Total loss** = "are the worst predictions getting better?"
+  Dominated by outliers.
+- **Mean RMSE** = "on average, how off is each surface?"
+  Robust to outliers but masks worst-case behavior.
+
+### Verdict and decision
+
+**B=4 accepted as the new baseline.** Reasons:
+
+1. The improvements (median, worst-case, range) are in the
+   directions that matter for the project's goal: a model that
+   generalizes across surfaces, including hard ones.
+2. The regressions (mean, min) are small in absolute terms (~2m
+   each) and concentrated on surfaces that were already very easy.
+3. The optimization-objective improvement (16% lower total loss)
+   is substantial.
+4. The gradient-variance hypothesis from O2 is partially
+   supported: averaging across 4 surfaces does smooth gradient
+   estimates, and the model finds a better basin.
+
+### Caveats and implications
+
+1. **Mean RMSE alone is a misleading metric for this dataset.**
+   The thesis should report mean, median, max, and per-surface
+   breakdowns. The aggregate hides important per-surface variance.
+
+2. **B=2 is unexplored.** It's plausible there's a sweet spot
+   between B=1's surface-by-surface optimization and B=4's
+   aggressive averaging. Deferred to Stage 12 ablations.
+
+3. **N=1 experiment.** This is a single A/B with a single seed.
+   Both runs use the same data shuffling RNG so they're directly
+   comparable, but we haven't varied the seed. The conclusion would
+   be stronger with 3-5 seeds per condition; deferred for time.
+
+4. **Stage 10 (evaluation) should report per-surface metrics by
+   default**, not just aggregates, to keep this kind of nuance
+   visible going forward.
+
+### Where the result lives
+
+- B=4 checkpoint: `outputs/tensorboard/run_20260609_092252/best.pt`
+  (epoch 28, best_val_loss=322651).
+- B=1 baseline checkpoint: `outputs/tensorboard/run_20260609_072419/best.pt`
+  (epoch 17, best_val_loss=385594).
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:

@@ -745,6 +745,85 @@ Stage 8.5 if LR scheduling needs debugging.
 
 ---
 
+## Stage 9 — Gradient accumulation
+
+### D9.1 — Gradient accumulation: divide each loss by actual batch size, clip after
+**Decision:** Training accumulates gradients across `accum_steps`
+surfaces before each optimizer step. The accumulation is implemented
+as a nested loop in `horizons/training/loop.py::train()`:
+
+```python
+for batch_start in range(0, n_train, accum_steps):
+    batch_indices = order[batch_start : batch_start + accum_steps]
+    batch_size = len(batch_indices)  # may be smaller than accum_steps on
+                                     # the last batch of the epoch
+
+    optimizer.zero_grad()
+    for idx in batch_indices:
+        loss = ... (forward + rollout_loss)
+        if not torch.isfinite(loss):
+            continue                        # skip surface; don't skip batch
+       ss / batch_size).backward()      # accumulate the MEAN gradient
+
+    if n_successful_in_batch > 0:
+        clip_grad_norm_(model.parameters(), grad_clip_norm)
+        optimizer.step()
+```
+
+The choices encoded here:
+
+1. **Divide each loss by the actual `batch_size`, not by `accum_steps`.**
+   The last batch of an epoch may be smaller than `accum_steps`
+   (e.g., 30 surfaces / 4 = 7 full batches + 1 partial batch of 2).
+   Dividing by the actual size keeps the accumulated gradient equal
+   to the true *mean*, regardless of batch size. Dividing by
+   `accum_steps` instead would under-scale partial batches and bias
+   the optimizer toward them.
+
+2. **Gradient clipping is applied to the accumulated (mean) gradient,
+   once, before the step.** Not per-surface. The clip threshold is
+   independent of batch size this way — same `grad_clip_norm=1.0`
+   works for `accum_steps=1` and `accum_steps=4` alike.
+
+3. **NaN handling is at two levels.** A non-finite loss on one
+   surface causes us to skip that surface but continue the batch.
+   If *all* surfaces in a batch produced NaN losses, the entire
+   batch is skipped (no optimizer step). This keeps the loop robust
+   to pathological surfaces without losing legitimate updates from
+   other surfaces in the same batch.
+
+4. **End-of-epoch metric is mean per successful *surface*, not per
+   *optimizer step*.** The train_record reports `loss_total` as the
+   sum of per-surface losses divided by `n_successful_surfaces`.
+   This keeps numbers directly comparable across different
+ `accum_steps` values: a per-surface average is invariant under
+   batch size, but a per-step average would scale up with batch size.
+
+**Where:** `horizons/training/loop.py`, the batch loop in `train()`.
+
+**Why:**
+- Per-surface losses span ~6 orders of magnitude (O2). Without
+  accumulation, every optimizer step is dominated by whichever
+  surface happened to be drawn, making the optimizer's signal
+  high-variance. Accumulating across a mini-batch averages this out.
+- Dividing by `actual batch_size` (rather than `accum_steps`) is the
+  same trick used by standard PyTorch trainers; it's the only way
+  to handle partial-batch edge cases without bias.
+- Per-surface metrics for logging are essential because we want to
+  compare runs at different `accum_steps` values; per-step metrics
+  would conflate batch size with training quality.
+
+**Trade-off:** With `accum_steps=4` and 30 train surfaces, we get
+only ~8 optimizer steps per epoch (vs. ~30 without accumulation).
+The model receives 4× fewer updates per epoch ut each is more
+stable. Whether this is a net win depends on the data; the A/B
+result will be recorded in OBSERVATIONS.md once Stage 9.3 completes.
+
+**Status:** Fixed. The choice of `accum_steps` itself remains a
+hyperparameter (Hydra `optim.accum_steps`, default 4).
+
+---
+
 ## Future / open decisions
 
 These are decisions we know we need to make but haven't yet, or

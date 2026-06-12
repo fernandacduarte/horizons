@@ -88,6 +88,7 @@ def main(cfg: DictConfig) -> None:
             lr_schedule=cfg.train.lr_schedule,
             patience=cfg.train.patience,
             checkpoint_path=str(checkpoint_path),
+            accum_steps=cfg.optim.accum_steps,
         )
     finally:
         writer.close()

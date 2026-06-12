@@ -112,6 +112,7 @@ def train(
     lr_schedule: str = "cosine",
     patience: int | None = None,
     checkpoint_path: str | Path | None = None,
+    accum_steps: int = 1,
 ) -> TrainState:
     """Train a horizon-extrapolation model.
 
@@ -191,80 +192,122 @@ def train(
         epoch_data_sum = 0.0
         epoch_curv_sum = 0.0
         epoch_res_sum = 0.0
-        n_successful_steps = 0
+        n_successful_surfaces = 0
+        n_optimizer_steps = 0
 
         model.train()
-        for idx in order:
-            item = train_dataset[idx]
-
-            # Move tensors to device
-            z0 = item["z0"].to(device)
-            z_true = item["z_true"].to(device)
-            V_xy = item["V"][:, :2].to(device)
-            F = item["F"].to(device)
-            edge_index = item["edge_index"].to(device)
-            mask = item["mask"].to(device)
-            d = item["d"].to(device)
-            N = item["N"]
+        # Iterate in batches of accum_steps. The last batch may be smaller
+        # if n_train is not divisible by accum_steps.
+        for batch_start in range(0, n_train, accum_steps):
+            batch_indices = order[batch_start : batch_start + accum_steps]
+            batch_size = len(batch_indices)
 
             optimizer.zero_grad()
-            result = rollout(
-                model,
-                z0=z0, z_true=z_true,
-                V_xy=V_xy, F=F, edge_index=edge_index,
-                mask=mask, d=d, N=N,
-            )
-            loss_dict = rollout_loss(
-                z_trajectory=result.z_trajectory,
-                dz_trajectory=result.dz_trajectory,
-                z_true=z_true, d=d, edge_index=edge_index, mask=mask,
-                lambda_f=lambda_f, lambda_p=lambda_p,
-                lambda_c=lambda_c, lambda_r=lambda_r,
-            )
-            loss = loss_dict["total"]
+            batch_loss_sum = 0.0
+            batch_data_sum = 0.0
+            batch_curv_sum = 0.0
+            batch_res_sum = 0.0
+            n_successful_in_batch = 0
+            last_surface_id = None  # for logging
+            last_N = 0
 
-            if not torch.isfinite(loss):
+            for idx in batch_indices:
+                item = train_dataset[idx]
+                last_surface_id = item["surface_id"]
+                last_N = item["N"]
+
+                # Move tensors to device
+                z0 = item["z0"].to(device)
+                z_true = item["z_true"].to(device)
+                V_xy = item["V"][:, :2].to(device)
+                F = item["F"].to(device)
+                edge_index = item["edge_index"].to(device)
+                mask = item["mask"].to(device)
+                d = item["d"].to(device)
+                N = item["N"]
+
+                result = rollout(
+                    model,
+                    z0=z0, z_true=z_true,
+                    V_xy=V_xy, F=F, edge_index=edge_index,
+                    mask=mask, d=d, N=N,
+                )
+                loss_dict = rollout_loss(
+                    z_trajectory=result.z_trajectory,
+                    dz_trajectory=result.dz_trajectory,
+                    z_true=z_true, d=d, edge_index=edge_index, mask=mask,
+                    lambda_f=lambda_f, lambda_p=lambda_p,
+                    lambda_c=lambda_c, lambda_r=lambda_r,
+                )
+                loss = loss_dict["total"]
+
+                if not torch.isfinite(loss):
+                    if verbose:
+                        print(
+                            f"  step {state.step}: NON-FINITE loss "
+                            f"({loss.item()}) on surface "
+                            f"{item['surface_id']}. Skipping this surface."
+                        )
+                    continue
+
+                # Divide by batch_size so accumulated gradient = mean gradient.
+                # We use the actual batch_size (not accum_steps) so partial
+                # batches at the end of an epoch still produce a mean, not
+                # an under-scaled gradient.
+                (loss / batch_size).backward()
+
+                batch_loss_sum += loss.item()
+                batch_data_sum += loss_dict["data"].item()
+                batch_curv_sum += loss_dict["curv"].item()
+                batch_res_sum += loss_dict["res"].item()
+                n_successful_in_batch += 1
+
+            if n_successful_in_batch == 0:
+                # Entire batch failed; skip the optimizer step
                 if verbose:
                     print(
-                        f"  step {state.step}: NON-FINITE loss "
-                        f"({loss.item()}) on surface "
-                        f"{item['surface_id']}. Skipping step."
+                        f"  step {state.step}: entire batch failed; "
+                        f"skipping optimizer step"
                     )
                 state.step += 1
                 continue
 
-            loss.backward()
             torch.nn.utils.clip_grad_norm_(
                 model.parameters(), max_norm=grad_clip_norm,
             )
             optimizer.step()
 
-            epoch_loss_sum += loss.item()
-            epoch_data_sum += loss_dict["data"].item()
-            epoch_curv_sum += loss_dict["curv"].item()
-            epoch_res_sum += loss_dict["res"].item()
-            n_successful_steps += 1
+            # Aggregate stats
+            mean_batch_loss = batch_loss_sum / n_successful_in_batch
+            epoch_loss_sum += batch_loss_sum
+            epoch_data_sum += batch_data_sum
+            epoch_curv_sum += batch_curv_sum
+            epoch_res_sum += batch_res_sum
+            n_successful_surfaces += n_successful_in_batch
+            n_optimizer_steps += 1
 
             if verbose and state.step % log_every_steps == 0:
                 print(
                     f"  ep {epoch:3d}  step {state.step:5d}  "
-                    f"{item['surface_id']:<22} N={N:<3} "
-                    f"loss={loss.item():.4f}"
+                    f"batch_size={n_successful_in_batch}  "
+                    f"last={last_surface_id:<22} N={last_N:<3} "
+                    f"batch_mean_loss={mean_batch_loss:.4f}"
                 )
             state.step += 1
 
         # End-of-epoch summary
-        if n_successful_steps == 0:
-            raise RuntimeError(f"No successful steps in epoch {epoch}")
+        if n_successful_surfaces == 0:
+            raise RuntimeError(f"No successful surfaces in epoch {epoch}")
 
         train_record = {
             "epoch": epoch,
-            "loss_total": epoch_loss_sum / n_successful_steps,
-            "loss_data": epoch_data_sum / n_successful_steps,
-            "loss_curv": epoch_curv_sum / n_successful_steps,
-            "loss_res": epoch_res_sum / n_successful_steps,
-            "n_steps": n_successful_steps,
-            "n_skipped": n_train - n_successful_steps,
+            "loss_total": epoch_loss_sum / n_successful_surfaces,
+            "loss_data": epoch_data_sum / n_successful_surfaces,
+            "loss_curv": epoch_curv_sum / n_successful_surfaces,
+            "loss_res": epoch_res_sum / n_successful_surfaces,
+            "n_surfaces": n_successful_surfaces,
+            "n_optimizer_steps": n_optimizer_steps,
+            "n_skipped": n_train - n_successful_surfaces,
         }
         state.train_history.append(train_record)
 
