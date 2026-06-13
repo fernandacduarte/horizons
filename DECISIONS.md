@@ -872,7 +872,48 @@ significantly more than it hurts `half_plane`.
 model to "always output harmonic infill," which beats us on
 `outward_pinned` but loses our `half_plane` advantage.
 
-**Results:** _(to be filled in)_
+**Results (Stage 11.1):** Negative.
+Ran with `λ_c=0.1, λ_r=0.01`. Compared to Stage 9 B=4 baseline
+(λ_c=0.01, λ_r=0.001):
+
+| Regime | baseline mean RMSE | λ_c=0.1 mean RMSE | Δ |
+|---|---|---|---|
+| half_plane | 133.7 | 155.6 | +21.9 (worse) |
+| outward_free | 21.2 | 20.1 | −1.1 (similar) |
+| outward_pinned | 95.5 | 106.3 | +10.8 (worse) |
+| Overall | 101.4 | 115.7 | +14.3 (worse) |
+
+The intended effect (improve `outward_pinned` via smoothness) did
+not materialize. All regimes got worse or stayed similar.
+
+**Interpretation:** Penalizing the per-iteration umbrella
+Laplacian of z is not the same as forcing the final z to be
+smooth. The harmonic infill baseline minimizes the *final* z's
+Laplacian via a global linear solve; our regularizer constrains
+the *per-iteration* output of an iterative learned operator,
+which is a different mathematical object. The two notions of
+"smoothness" aren't equivalent, and the latter doesn't push
+toward the former.
+
+In addition, stronger regularization slowed convergence: best
+epoch moved from 28 (baseline) to 47 (this run), and training
+early-stopped later (67 vs 38). Some of the regression may be
+training inefficiency, but the directional finding is robust:
+this lever is not the right one for the `outward_pinned` gap.
+
+**Decision:** Skip Candidates 1b and 1c. The trade-off curve
+goes the wrong direction; sweeping λ_c higher will likely make
+things worse, not better. Move directly to Candidate 2.
+
+**Lesson:** Closing the `outward_pinned` gap requires a stronger
+inductive bias toward smoothness *as input*, not as a loss term.
+Candidate 2 (harmonic init) is exactly that — give the model
+harmonic infill as the starting point and let it learn corrections.
+
+**Where the run lives:** `outputs/tensorboard/run_20260613_175830/`.
+Evaluation: `outputs/evaluation/run_20260613_175830_val.json`.
+
+---
 
 ### Candidate 2 (Tier 1): Harmonic infill as initialization
 
