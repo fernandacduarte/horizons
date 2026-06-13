@@ -824,6 +824,189 @@ hyperparameter (Hydra `optim.accum_steps`, default 4).
 
 ---
 
+## Stage 11 — Hyperparameter improvements (planning)
+
+This section is different from the D*.* "decisions" above: it's a
+**planning document for candidate improvements** we intend to try
+before the final test evaluation. Each candidate has a hypothesis
+(why we think it will help), a plan (what we'll change), and a
+results slot (what actually happened, filled in after the run).
+
+The motivation comes from O5: our model wins on `half_plane` but
+loses to harmonic infill on `outward_pinned`, and fails badly on
+`10_BaseModelo` (a perfectly flat surface where the answer is
+zero). The goal is to close those gaps while preserving the
+`half_plane` advantage, so that we can defensibly justify the use
+of a neural network across regimes.
+
+Candidates are ordered by expected impact / effort ratio.
+
+### Candidate 1 (Tier 1): Increase regularizer weights (λ_c, λ_r)
+
+**Hypothesis:** At the current best epoch, loss_curv ≈ 1500 and
+loss_res ≈ 30. With λ_c=0.01 and λ_r=0.001, their contributions to
+total loss are 15 and 0.03 — completely dominated by the data loss
+of ~322,000. The regularizers are essentially turned off. By
+increasing λ_c we force the model to be smoother, which should
+help `outward_pinned` (interpolation between anchors, where
+smoothness is the right inductive bias). By increasing λ_r we
+penalize large per-iteration Δz, which should help the flat-surface
+case where the answer is "do nothing."
+
+**Plan:**
+- Run 3 configurations to sweep:
+  - `λ_c=0.1, λ_r=0.01` (10× current).
+  - `λ_c=0.5, λ_r=0.05` (50× current).
+  - `λ_c=1.0, λ_r=0.1` (100× current).
+- All other hyperparameters as in Stage 9 B=4 baseline.
+- Full 100-epoch training with patience=20.
+- Use the Stage 10 evaluation suite on val for comparison.
+
+**Diagnostic:** Watch the per-regime breakdown carefully. We
+*expect* `outward_pinned` to improve. We expect `half_plane` to
+get slightly worse (smoothness penalty hurts extrapolation
+fidelity). The trade-off needs to favor `outward_pinned`
+significantly more than it hurts `half_plane`.
+
+**Risk:** Too much smoothness regularization could collapse the
+model to "always output harmonic infill," which beats us on
+`outward_pinned` but loses our `half_plane` advantage.
+
+**Results:** _(to be filled in)_
+
+### Candidate 2 (Tier 1): Harmonic infill as initialization
+
+**Hypothesis:** Currently the model has to learn extrapolation
+from a mean-plane init, which is a poor starting point on
+non-trivial geometries. If we instead initialize z⁰ to be the
+harmonic infill (Stage 10.2's baseline), the model only needs to
+learn the *residual* from a strong baseline. Mathematically, this
+is iterative refinement from numerical analysis. Practically, it
+gives us harmonic infill's performance as a floor; the model can
+only do better, not worse (if trained correctly).
+
+**Plan:**
+- Modify `horizons.data.init` to add a `harmonic_init()` function.
+- Add a config flag `init.method: meanplane | harmonic` (default
+  `meanplane` for now; change to `harmonic` for this experiment).
+- Run with the best Candidate 1 config (i.e., whatever regularizer
+  weights worked best).
+- Compare against the Candidate 1 result.
+
+**Diagnostic:** The model's predictions should be very close to
+harmonic infill at the beginning of training (Δz ≈ 0 produces the
+input z⁰). Over training, it should learn corrections. If the
+model learns to *only* output zeros (Δz = 0 everywhere), we get
+exactly harmonic infill — that's the worst case, and it's still
+much better than our current `outward_pinned` performance.
+
+**Risk:** Implementation complexity. Harmonic infill requires
+solving a sparse linear system per surface, which adds overhead.
+We'll need to pre-compute it during dataset construction or
+cache it. Also: harmonic infill needs the FULL z_true on K to
+compute, but during training the K varies per epoch. We need to
+recompute harmonic infill per mask, not per surface.
+
+**Results:** _(to be filled in)_
+
+### Candidate 3 (Tier 2): Mask augmentation
+
+**Hypothesis:** Sample 2-3 masks per surface per epoch instead of 1.
+This triples the effective training data and exposes the model to
+more mask variations, improving generalization.
+
+**Plan:** Modify `HorizonDataset` to optionally sample multiple
+masks per surface per epoch. Default 1 (current behavior), config
+flag to set 2-3.
+
+**Risk:** Per-epoch cost increases proportionally.
+
+**Results:** _(to be filled in)_
+
+### Candidate 4 (Tier 2): Longer training with smaller LR
+
+**Hypothesis:** Our B=4 run early-stopped at epoch 48 of 100. With
+a smaller LR (e.g., 5e-4 instead of 1e-3) and more patience, the
+model might find a better basin.
+
+**Plan:** Run with lr=5e-4, patience=40, n_epochs=200.
+
+**Risk:** Pure compute cost; could also just confirm we've already
+converged.
+
+**Results:** _(to be filled in)_
+
+### Candidate 5 (Tier 2): Rebalance regime weights toward `outward_pinned`
+
+**Hypothesis:** Currently regime weights are 30/40/30. If
+`outward_pinned` is the hardest regime, upweighting it during
+training (e.g., 25/30/45) would give the model more practice on it.
+
+**Plan:** Change `MaskSamplerConfig` regime weights, retrain with
+otherwise the best config so far.
+
+**Risk:** Could overfit to one regime at the expense of others.
+
+**Results:** _(to be filled in)_
+
+### Candidate 6 (Tier 3): Larger model
+
+**Hypothesis:** We have 21k parameters. Modern GNNs often use
+100k+. Maybe we're capacity-limited.
+
+**Plan:** Try hidden_dim=128 (vs current 64), and/or
+n_message_passing=3 (vs current 2).
+
+**Risk:** Slower training; could also just overfit our small
+dataset.
+
+**Results:** _(to be filled in)_
+
+### Candidate 7 (Tier 3): EdgeConv or GAT operator
+
+**Hypothesis:** SAGEConv is a basic choice. Edge-conditioned
+operators or attention-based GNNs might capture geological
+features better.
+
+**Plan:** Implement an EdgeConv-based LocalOperator variant.
+
+**Risk:** Significant refactoring; impact unclear.
+
+**Results:** _(to be filled in)_
+
+### Candidate 8 (Tier 3): Cotangent Laplacian
+
+**Hypothesis:** The umbrella Laplacian (D1.6) ignores mesh angles.
+The cotangent Laplacian respects local geometry and is more
+"correct" for surfaces. Could give better curvature features.
+
+**Plan:** Implement cotangent Laplacian as an alternative
+`compute_umbrella_laplacian` function; use as a feature.
+
+**Risk:** Numerical issues at sliver triangles; more complex code.
+
+**Results:** _(to be filled in)_
+
+### Execution order
+
+Plan: do Candidates 1 and 2 first (cheap, directly target failure
+modes). Then revisit the candidate list based on what we learn:
+- If Candidate 1 already closes most of the `outward_pinned` gap,
+  Candidate 2 may not be needed.
+- If neither closes the gap, we'll know the issue is architectural
+  (Candidates 6, 7, 8) rather than hyperparameter-related.
+
+After improvements, run the final evaluation on **test_id and
+test_ood** with the chosen final config (Stage 10 final).
+
+If after all attempts, the model still loses to harmonic infill on
+`outward_pinned`, that's a legitimate empirical finding that
+deserves a clean writeup in the thesis: "neural networks add value
+in extrapolation regimes but not in interpolation regimes; for
+the latter, classical methods remain the right tool."
+
+---
+
 ## Future / open decisions
 
 These are decisions we know we need to make but haven't yet, or
