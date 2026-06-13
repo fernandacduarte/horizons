@@ -25,10 +25,50 @@ export HORIZONS_TS_DIR="/path/to/your/.ts/files"
 
 Or pass `--ts-dir /path/to/files` to either script.
 
-## Running the test suite
+## Common commands
 
+### Training
+```bash
+# Use defaults from configs/default.yaml
+python scripts/train.py
+
+# Override any config field at the command line (Hydra)
+python scripts/train.py train.n_epochs=100 train.patience=20 optim.accum_steps=4
+python scripts/train.py loss.lambda_c=0.1 loss.lambda_r=0.01
+```
+
+Each run produces:
+- `outputs/tensorboard/run_<TIMESTAMP>/` with `best.pt` (checkpoint),
+  `config.yaml` (snapshot), `summary.json`, and the TensorBoard events file.
+- `outputs/<date>/<time>/` (Hydra working directory) with the
+  resolved config and full stdout log.
+
+### Viewing TensorBoard
+```bash
+tensorboard --logdir=outputs/tensorboard
+```
+Then open http://localhost:6006
+
+### Evaluation suite on a trained checkpoint
+```bash
+python scripts/eval_run.py outputs/tensorboard/run_<TIMESTAMP>
+```
+This evaluates on val (3 masks per surface), saves a JSON record to
+`outputs/evaluation/`, and generates the four diagnostic plots to
+`outputs/evaluation/plots/`.
+
+### Running the test suite
 ```bash
 python -m pytest tests/ -v
+```
+
+### Inspecting a checkpoint
+```bash
+python -c "
+from horizons.eval.checkpoint import load_checkpoint, latest_checkpoint
+ckpt = load_checkpoint(latest_checkpoint())
+print(f'epoch: {ckpt.epoch}, best_val_loss: {ckpt.best_val_loss:.2f}')
+"
 ```
 
 ## Building the dataset (one-time)
