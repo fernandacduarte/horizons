@@ -388,6 +388,208 @@ genuinely measuring different things:
 
 ---
 
+## O5 — Baseline comparison: each method has its regime where it shines
+
+**Observed in:** Stage 10.3 (full evaluation driver run on val split,
+B=4 checkpoint, 7 surfaces × 3 mask samples = 21 records).
+
+### Setup
+
+We compared three methods on each (surface, mask) pair:
+- **Mean-plane init**: least-squares plane through K, evaluated on U.
+  This is our model's z⁰ initialization (D3.1), used as a sanity-floor.
+- **Harmonic infill**: discrete Laplace equation with Dirichlet boundary
+  z[K] = z_true[K]. Solved via scipy.sparse.linalg.spsolve. The classical
+  smoothness baseline (Stage 10.2).
+- **B=4 model**: our trained GNN-with-rollout (best Stage 9 checkpoint).
+
+Three mask samples per surface gave us a mix of regimes — the
+21 records broke down as: 11 `half_plane`, 4 `outward_free`,
+6 `outward_pinned` (close to the configured 30/40/30 weights).
+
+### Overall result: a three-way tie
+
+| Method | Mean RMSE | Median RMSE | Max RMSE |
+|---|---|---|---|
+| Mean-plane | 91.62 | 75.04 | 346.54 |
+| Harmonic | 91.80 | 81.84 | 341.16 |
+| **Model** | **101.35** | **71.79** | 371.79 |
+
+At the aggregate level, our model is slightly worse on the mean but
+slightly better on the median than harmonic infill. None of the
+three methods is dominant overall.
+
+### The regime breakdown is where the real story lives
+
+**`half_plane`** (n=11) — extrapolation across a cut:
+
+| Method | Mean | Median |
+|---|---|---|
+| Mean-plane | 135.61 | 140.08 |
+| Harmonic | 147.85 | 146.11 |
+| **Model** | **133.67** | 140.22 |
+
+The model wins on mean by 10m (~7%). Median is a wash. This is the
+hardest regime in absolute terms (largest RMSEs) and the model is
+contributing real value.
+
+**`outward_free`** (n=4) — extrapolation from a central area:
+
+| Method | Mean | Median |
+|---|---|---|
+| Mean-plane | 19.31 | 0.00 |
+| Harmonic | 24.78 | 2.54 |
+| Model | 21.21 | 9.86 |
+
+All methods are comparable. Numbers are small in absolute terms.
+The sample is too small (n=4) to draw firm conclusions; further
+investigation would need more data.
+
+**`outward_pinned`** (n=6) — interpolation between two anchors:
+
+| Method | Mean | Median |
+|---|---|---|
+| Mean-plane | 59.17 | 0.00 |
+| **Harmonic** | **33.73** | **2.70** |
+| Model | 95.53 | 79.42 |
+
+Harmonic infill dominates the model by ~3× on mean. This is exactly
+where harmonic should win: smooth interpolation between two anchored
+regions is mathematically harmonic infill's home turf.
+
+### Interpretation
+
+Each method has a regime where it excels:
+
+1. **For extrapolation across a cut (`half_plane`)** — our learned
+   model is the best of the three.
+2. **For extrapolation from a central area (`outward_free`)** —
+   methods are comparable.
+3. **For interpolation between two anchors (`outward_pinned`)** —
+   harmonic infill is mathematically near-optimal; smoothness alone
+   suffices.
+
+This is a defensible and honest result. The learned model adds value
+in the regimes where smoothness alone is insufficient (extrapolation
+with no second anchor), and underperforms in the regime where
+smoothness is the right inductive bias (two-sided interpolation).
+
+### Implications for the thesis
+
+- **Frame the contribution carefully.** Not "GNN beats classical
+  baselines on geological extrapolation" but "GNN provides value on
+  extrapolation tasks where smoothness assumptions break down;
+  classical methods remain the right choice for interpolation between
+  known regions."
+
+- **Per-regime evaluation is essential.** Aggregate metrics hide
+  the fact that the model wins in some regimes and loses in others.
+  Future evaluation should always report regime breakdowns.
+
+- **Stage 12 ablations should investigate `outward_pinned`
+  specifically.** Why is the model failing on smooth interpolation?
+  Candidates: (a) the data loss is too forgiving for smooth surfaces
+  so the model doesn't learn to be smooth, (b) the regime is
+  under-weighted in training (currently 30%), (c) the model's
+  capacity is being spent on extrapolation features that don't help
+  interpolation.
+
+- **The "10_BaseModelo flat surface" issue from the previous O5
+  draft remains real:** the model produces 110m of RMSE on a perfectly
+  flat surface where the answer is zero. This is a structural
+  weakness in the model not learning the identity function. Worth
+  diagnosing.
+
+### Where the result lives
+
+- Raw evaluation records: `outputs/evaluation/val_b4.json` (21 records
+  with per-(surface, mask) RMSEs for all three methods, plus per-ring
+  breakdown for the model).
+- Reproducible: deterministic seeds via `base_seed + surface_idx * 100
+  + mask_idx`; same call gives identical numbers.
+
+### Caveats
+
+- **Single checkpoint.** This evaluation is of the Stage 9 B=4
+  checkpoint only. A future run with different hyperparameters might
+  shift the picture.
+- **No statistical significance testing.** With only 21 records (split
+  across 3 regimes), differences of ~10m on means are within plausible
+  noise. The interpretation is a directional claim, not a tight
+  statistical one.
+- **Val set, not test set.** Conclusions apply to the val
+  distribution; we have not yet evaluated on test_id or test_ood.
+
+### Visual evidence (Stage 10.4 plots)
+
+Four figures generated from the same val_b4.json data, saved to
+`outputs/evaluation/plots/`:
+
+**`val_b4_regime_bars.png`** — Mean RMSE per (regime, method), grouped
+by regime. This is the headline summary figure. Shows the
+per-regime story at a glance:
+- `half_plane`: GNN model (133.7) < mean-plane (135.6) < harmonic
+  (147.8). Small but clean win for the learned model.
+- `outward_free`: all methods comparable (~20m).
+- `outward_pinned`: harmonic (33.7) << mean-plane (59.2) << model (95.5).
+  Harmonic dominates.
+
+**`val_b4_distribution.png`** — Strip plot of per-(surface, mask) RMSE
+for each method, split by regime. Shows the variance hidden by mean
+aggregates. Key observations:
+- In `half_plane`, the model has slightly tighter spread than the
+  baselines; the means are similar but the model is more consistent.
+- In `outward_pinned`, the visual contrast is stark: harmonic and
+  mean-plane cluster near zero with one outlier; model values are
+  spread between 60-130m with one at 275m. The dichotomy in
+  performance is unmistakable.
+
+**`val_b4_per_ring.png`** — Per-ring RMSE curves, one subplot per
+regime. Thin transparent blue lines show individual records; thick
+blue line is the median (filtered to rings with ≥10 vertices).
+Observations:
+- `half_plane`: median rises from ~60m at ring 1 to ~140m at ring
+  20, then plateaus, with an apparent spike at ring ~50. The
+  spike is dominated by very few records (only large-mesh
+  surfaces reach that depth); behavior at deep rings should not
+  be over-interpreted from val data.
+- `outward_free`: median curve is essentially flat near zero,
+  reflecting that the 4 records in this regime were all on
+  easy/smooth surfaces.
+- `outward_pinned`: classic inverted-U shape we predicted
+  geometrically. RMSE rises from ~80m near the inner anchor to
+  peak ~125m at ring 13 (the "deep middle" of the annulus),
+  then descends to ~60m as the frontier approaches the outer
+  anchor.
+
+**`val_b4_model_vs_harmonic.png`** — Per-(surface, mask) scatter:
+GNN RMSE (y) vs harmonic RMSE (x), colored by regime. The dashed
+diagonal is parity. Points below the line: model wins. Above: harmonic
+wins. Visually confirms what the bars show:
+- Purple (half_plane) dots cluster near the diagonal with model
+  winning on most.
+- Green (outward_free) dots cluster near the origin; methods
+  are interchangeable on this small sample.
+- Red (outward_pinned) dots are the clear "model loses" cluster:
+  two dots far above the diagonal at (180, 270) and (0, 130)
+  show harmonic substantially beating the model.
+
+### Caveats on the far-ring behavior in `half_plane`
+
+The half_plane median curve shows an apparent peak around ring 50 followed
+by a descent. This is unlikely to reflect genuine model improvement at
+long distances. More likely explanations: (a) only the largest meshes
+(e.g., `05_TopoCretaceo`) reach those depths, so the median at d>30 is
+computed from 1-2 records; (b) deep rings have few vertices and
+high-variance RMSE; (c) mesh-boundary vertices have constrained
+local geometry that may produce predictable predictions. For thesis
+reporting we should note that the model's "far-field" behavior cannot
+be characterized from val data; this would require larger meshes or
+synthetic far-field experiments.
+
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:
