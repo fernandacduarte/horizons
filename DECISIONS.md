@@ -975,7 +975,23 @@ honest expectation is mixed: the model would need to learn to
 more fundamental fix that should improve all regimes; once that's
 in place, we can revisit Candidate 2 with a better baseline.
 
-**Results:** _(deferred, see Candidate 9 first)_
+**Results (Stage 11.7-redo):** Mixed.
+With harmonic init on top of normalization, the GNN essentially
+matches harmonic infill on outward_pinned (36.6 vs 33.7), but
+loses some ground on half_plane (151.7 vs 134.0 baseline) and
+outward_free (21.5 vs 14.6). Overall mean is slightly worse
+(94.0 vs 89.3).
+
+We adopt meanplane init as the final default since it has lower
+overall mean and better half_plane. Harmonic init is documented
+as a useful ablation in O7 (OBSERVATIONS.md).
+
+Methodological side-finding from this experiment: best-checkpoint
+selection should use val_rmse_meters rather than val_loss. The
+val_loss criterion was masking continued model improvement
+because it has regularizer noise that val_rmse doesn't. This was
+fixed by adding the `train.best_metric` config field, default
+`val_rmse_meters`.
 
 ### Candidate 9 (NEW — Tier 1): Coordinate normalization
 

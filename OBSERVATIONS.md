@@ -718,6 +718,128 @@ to improve and the others to stay flat.
 
 ---
 
+## O7 — Harmonic infill as initialization: closes outward_pinned gap at the cost of half_plane
+
+**Observed in:** Stage 11.7 (two attempts). Same hyperparameters as
+Stage 11.6 (normalize_per_surface=true, B=4, λ defaults), only changed
+`data.init_method` to `harmonic`.
+
+### Two runs and a methodological finding
+
+We ran this experiment **twice** with different results, and the
+difference is itself informative:
+
+**Run 1** (Stage 11.7, run_20260614_133159): used the default
+early-stopping criterion of `val_loss`. Best checkpoint selected at
+epoch 13. Half_plane regressed massively (215m mean vs Stage 11.6's
+134m). Investigation showed the model was still learning when training
+stopped — val_rmse_meters was at 84m smoothed and still descending,
+while val_loss had plateaued.
+
+**Run 2** (Stage 11.7-redo, run_20260614_144819): same setup, but with
+`val_rmse_meters` as the early-stop and best-checkpoint criterion.
+The model was selected at a *much* better epoch — best
+val_rmse_meters=63m. Half_plane regression went from +81m to +17m.
+
+The difference between the two runs is a lesson about metric choice:
+val_loss includes regularizer terms that introduce noise, so it has
+spikes (epoch 12: 8.19, epoch 24: 7.01) that don't reflect
+underlying model quality. val_rmse_meters is what we report and is
+much smoother. Best-checkpoint selection should track the metric we
+ultimately care about.
+
+This finding is now baked into the training loop (commit
+`train.best_metric` defaults to `val_rmse_meters`).
+
+### The fair comparison
+
+With the corrected metric, Stage 11.7-redo result:
+
+| Regime | 11.6 (meanplane init) | 11.7-redo (harmonic init) | Δ |
+|---|---|---|---|
+| half_plane mean | 134.0 | 151.7 | +17.7 (worse) |
+| outward_free mean | 14.6 | 21.5 | +6.9 (worse, but tiny) |
+| outward_pinned mean | **57.3** | **36.6** | **−20.7 (better)** |
+| Overall mean | 89.3 | 94.0 | +4.7 (slightly worse) |
+
+And the medians:
+
+| Regime | 11.6 median | 11.7-redo median |
+|---|---|---|
+| outward_pinned | 0.45 | 2.51 |
+
+### Interpretation
+
+**The expected trade-off materialized.** From the preliminary
+investigation, we knew harmonic init starts the model ~12m worse
+on half_plane and ~25m better on outward_pinned. The trained model
+preserved approximately that asymmetry: half_plane got 17.7m worse
+and outward_pinned got 20.7m better. Net: slightly negative.
+
+**The outward_pinned result is striking.** Stage 11.7-redo's
+outward_pinned mean (36.6m) is essentially matching harmonic infill
+itself (33.7m). The GNN with harmonic init successfully *replicates*
+harmonic infill's interpolation quality, then adds nothing
+substantive on top of it for this regime.
+
+**The half_plane regression is small but real.** This regime
+remains our weakest, and starting from a less-suitable init makes
+it weaker. The model can't fully recover from the worse starting
+point in the available training time (or perhaps at all — see O6's
+hypothesis about architectural limits).
+
+### Decision: keep Stage 11.6 (meanplane init) as the final model
+
+The trade-off is unfavorable overall:
+- Stage 11.6 mean: 89.3 (lower)
+- Stage 11.7-redo mean: 94.0 (higher)
+
+Stage 11.6 also beats all three baselines on overall mean. Stage
+11.7-redo trails mean-plane on overall mean.
+
+Stage 11.7-redo is preserved as a deliberate ablation: it shows
+that with harmonic init, the GNN can match harmonic infill on
+`outward_pinned`. This is useful for the thesis story but not
+the headline result.
+
+### Implications for thesis writeup
+
+The honest framing for the report:
+
+> "We tested whether initializing the rollout from a harmonic infill
+> baseline (rather than mean-plane fit) would close the gap on
+> `outward_pinned`. It did: with harmonic init, the GNN achieves
+> 36.6m mean RMSE on `outward_pinned`, essentially matching harmonic
+> infill's 33.7m. However, this came at the cost of `half_plane`
+> performance (151.7m vs 134.0m) and slightly worse overall RMSE
+> (94.0m vs 89.3m). We adopted meanplane init as our final
+> configuration, since it has better overall and `half_plane`
+> performance. Harmonic init remains a useful ablation showing the
+> empirical trade-off between general extrapolation and
+> interpolation accuracy."
+
+### Where the result lives
+
+- Stage 11.7-redo checkpoint:
+  `outputs/tensorboard/run_20260614_144819/best.pt`
+  (epoch 13, best val_rmse_meters=63.04).
+- Evaluation:
+  `outputs/evaluation/run_20260614_144819_val.json`.
+
+### Caveats
+
+- **Architectural limit hypothesis (from O6) still standing.** Stage
+  11.7-redo's half_plane (152m) is similar to Stage 11.7's
+  half_plane (215m) — both are higher than 11.6 (134m). The
+  architectural bottleneck on half_plane is independent of init
+  choice; init only modulates the magnitude.
+- **One seed each.** All three runs (11.6, 11.7, 11.7-redo) are
+  single-seed comparisons.
+- **Val set only.** Stage 12 (final test evaluation) hasn't been
+  run yet.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:
