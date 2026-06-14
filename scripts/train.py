@@ -38,6 +38,7 @@ def main(cfg: DictConfig) -> None:
         "train", mask_config=mask_cfg,
         normalize_per_surface=cfg.data.normalize_per_surface,
         init_method=cfg.data.init_method,
+        n_masks_per_epoch=cfg.data.n_masks_per_epoch,
     )
     val_ds = load_split_dataset(
         "val", mask_config=mask_cfg,

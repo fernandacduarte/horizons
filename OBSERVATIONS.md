@@ -840,6 +840,109 @@ The honest framing for the report:
 
 ---
 
+## O8 — Mask augmentation (n=3) improves all regimes, especially the median
+
+**Observed in:** Stage 11.8 (full training run with
+`data.n_masks_per_epoch=3`, otherwise identical to Stage 11.6:
+normalize=true, init=meanplane, B=4). Each train epoch sees 90
+items (30 surfaces × 3 distinct masks) instead of 30.
+
+### The result
+
+| Regime | 11.6 (n=1) | 11.8 (n=3) | Δ mean | Δ median |
+|---|---|---|---|---|
+| half_plane | mean=134.0, med=140.8 | mean=125.4, med=115.2 | −8.6 | **−25.6** |
+| outward_free | mean=14.6, med=0.44 | mean=7.4, med=0.65 | **−7.2 (−49%)** | +0.2 |
+| outward_pinned | mean=57.3, med=0.45 | mean=55.0, med=0.72 | −2.3 | +0.3 |
+| Overall | mean=89.3, med=57.0 | **mean=82.8, med=38.3** | **−6.5** | **−18.7 (−33%)** |
+
+### The model now leads on every aggregate metric
+
+| Method | Mean | Median |
+|---|---|---|
+| Mean-plane | 91.62 | 75.04 |
+| Harmonic | 91.80 | 81.84 |
+| **GNN model** | **82.84** | **38.33** |
+
+For the first time in this project, the GNN beats both classical
+baselines on both mean and median aggregate metrics. The median
+improvement is particularly striking: GNN's 38.3m vs the better
+baseline's 75.0m is a 49% improvement.
+
+### Per-regime: improvements where we expected and didn't expect
+
+**The big surprise**: half_plane improved. We hypothesized in O6 that
+half_plane was architecturally limited (deep extrapolation with only
+one anchor). Mask augmentation closing 6% of the gap suggests the
+issue is at least *partially* data-related, not purely architectural.
+The hypothesis was too strong.
+
+**The expected wins**: outward_free improved by 49%, outward_pinned
+improved slightly. More data exposures to each surface let the model
+learn better per-surface behaviors.
+
+**The unchanged**: outward_pinned mean barely moved (-2). Harmonic
+infill still wins this regime by ~22m. The architectural hypothesis
+likely holds *here*: smoothness-dominated interpolation is genuinely
+where classical methods are mathematically optimal.
+
+### Why per-ring outward_free looks like a flat zero line
+
+The 4 outward_free records broke down as 3 horizonte7 samples (a near-
+flat val surface with z_range ≈ 18m) and 1 TestHorizon7 sample.
+On near-flat surfaces, there's essentially nothing to extrapolate;
+the truth is already close to mean-plane init. The per-ring RMSE is
+near zero across all rings, dragging the median to zero. This is an
+artifact of small val sample size in this regime, not of model
+behavior. Worth keeping in mind when interpreting plots.
+
+### Training dynamics
+
+- Best epoch: 36 (well within the 100-epoch budget).
+- Early-stopped at epoch 56 (no val_rmse_meters improvement for 20).
+- Train loss at end: ~3-4, still descending.
+- Val loss / val_rmse_meters at end: bouncing around floor of ~75m
+  for the last ~20 epochs.
+
+**Train loss was still descending when val plateaued.** This suggests:
+- Capacity is not exhausted (more parameters could fit the train data).
+- But generalization is plateauing — additional fitting doesn't transfer
+  to val.
+- A natural follow-up: longer training with smaller LR, combined with
+  even more augmentation (n=5+), might extract more.
+
+### Implications for the thesis story
+
+The neural network is now defensibly justified across regimes:
+
+> "On the val split, the trained GNN achieves a mean RMSE of 82.8m,
+> outperforming mean-plane initialization (91.6m) and harmonic infill
+> (91.8m). The model leads on every aggregate metric. The improvement
+> is concentrated in extrapolation regimes (half_plane: 125 vs 136,
+> outward_free: 7 vs 19), with classical harmonic infill remaining
+> competitive only on outward_pinned (interpolation between two
+> anchors), where smoothness assumptions are mathematically optimal."
+
+### Where the result lives
+
+- Checkpoint: `outputs/tensorboard/run_20260614_155745/best.pt`
+  (epoch 36, best val_rmse_meters=64.62).
+- Evaluation: `outputs/evaluation/run_20260614_155745_val.json`.
+
+### Caveats
+
+- **Per-epoch cost roughly tripled** (~225s vs ~75s). A full run is
+  ~2.5 hours.
+- **Single seed.** All previous caveats apply.
+- **Val set is small (21 records).** Differences of a few meters are
+  within plausible noise.
+- **Val set has 2 near-flat surfaces** (horizonte7 with z_range=18m,
+  10_BaseModelo with z_range=0m). These dominate the median in some
+  regimes. The mean is the more representative aggregate for these
+  data.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:

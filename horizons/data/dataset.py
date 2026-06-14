@@ -18,13 +18,21 @@ from horizons.data.masking import MaskSampler, MaskSamplerConfig
 from horizons.data.init import init_z, init_z_dispatch
 
 
-def _make_rng(surface_id: str, epoch: int, split: str) -> torch.Generator:
-    """Deterministic RNG: same (surface_id, epoch, split) -> same mask.
+def _make_rng(
+    surface_id: str, epoch: int, split: str, mask_idx: int = 0,
+) -> torch.Generator:
+    """Deterministic RNG: same (surface_id, epoch, split, mask_idx) -> same mask.
+
+    The mask_idx field exists so we can sample multiple distinct masks
+    per surface per epoch (mask augmentation, Stage 11.8 / Candidate 3).
+    With n_masks_per_epoch=1 (default), mask_idx is always 0 and the
+    behavior is identical to before. With n_masks_per_epoch=N>1, mask_idx
+    ranges from 0 to N-1 and each yields a different mask.
 
     We hash a string seed and use it to seed a fresh Generator. This is
     portable and doesn't depend on the order in which items are accessed.
     """
-    seed_str = f"{surface_id}|{epoch}|{split}"
+    seed_str = f"{surface_id}|{epoch}|{split}|{mask_idx}"
     # Python's built-in hash() is salted by default, so it is not stable
     # across runs. Use SHA-256 for deterministic seeding.
     # Reduce the result to a non-negative 63-bit integer for manual_seed().
@@ -74,6 +82,7 @@ class HorizonDataset(Dataset):
         center_per_surface: bool = True,
         normalize_per_surface: bool = False,
         init_method: str = "meanplane",
+        n_masks_per_epoch: int = 1,
     ) -> None:
         if len(surfaces) == 0:
             raise ValueError("HorizonDataset must be non-empty")
@@ -85,6 +94,19 @@ class HorizonDataset(Dataset):
             raise ValueError(
                 f"init_method must be 'meanplane' or 'harmonic'; got {init_method!r}"
             )
+        if n_masks_per_epoch < 1:
+            raise ValueError(
+                f"n_masks_per_epoch must be >=1; got {n_masks_per_epoch}"
+            )
+        # Val/test datasets always use n_masks_per_epoch=1 to keep
+        # evaluation deterministic and comparable across runs. Masks
+        # vary at evaluation time via the eval driver's seed param,
+        # not here.
+        if split != "train" and n_masks_per_epoch != 1:
+            raise ValueError(
+                f"n_masks_per_epoch>1 only valid for split='train'; "
+                f"got split={split!r}, n_masks_per_epoch={n_masks_per_epoch}"
+            )
         self.surfaces = surfaces
         self.mask_sampler = mask_sampler
         self.split = split
@@ -92,6 +114,7 @@ class HorizonDataset(Dataset):
         self.center_per_surface = center_per_surface
         self.normalize_per_surface = normalize_per_surface
         self.init_method = init_method
+        self.n_masks_per_epoch = n_masks_per_epoch
 
     def set_epoch(self, epoch: int) -> None:
         """Called at the start of each training epoch so masks resample.
@@ -102,14 +125,21 @@ class HorizonDataset(Dataset):
         self._epoch = epoch
 
     def __len__(self) -> int:
-        return len(self.surfaces)
+        return len(self.surfaces) * self.n_masks_per_epoch
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
-        surface = self.surfaces[idx]
+        # When n_masks_per_epoch > 1, idx encodes both the surface index
+        # and the mask index within that surface. We decompose by integer
+        # division and modulo. With n_masks_per_epoch = 1 (default), this
+        # is equivalent to the previous behavior: mask_idx == 0 always.
+        surface_idx, mask_idx = divmod(idx, self.n_masks_per_epoch)
+        surface = self.surfaces[surface_idx]
 
         # Train masks vary by epoch; val/test masks are stable
         epoch_for_seed = self._epoch if self.split == "train" else 0
-        rng = _make_rng(surface.surface_id, epoch_for_seed, self.split)
+        rng = _make_rng(
+            surface.surface_id, epoch_for_seed, self.split, mask_idx=mask_idx,
+        )
 
         mask, d, regime = self.mask_sampler.sample(surface, rng)
 
@@ -210,6 +240,7 @@ def load_split_dataset(
     center_per_surface: bool = True,
     normalize_per_surface: bool = False,
     init_method: str = "meanplane",
+    n_masks_per_epoch: int = 1,
 ) -> HorizonDataset:
     """Build a HorizonDataset for one of the real-data splits.
 
@@ -229,4 +260,5 @@ def load_split_dataset(
         center_per_surface=center_per_surface,
         normalize_per_surface=normalize_per_surface,
         init_method=init_method,
+        n_masks_per_epoch=n_masks_per_epoch,
     )

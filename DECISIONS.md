@@ -1066,7 +1066,21 @@ flag to set 2-3.
 
 **Risk:** Per-epoch cost increases proportionally.
 
-**Results:** _(to be filled in)_
+**Results (Stage 11.8):** Win.
+With n=3, all regimes improved or stayed stable:
+- Overall mean: 89.3 → 82.8 (−7%)
+- Overall median: 57.0 → 38.3 (−33%)
+- half_plane mean: 134.0 → 125.4 (−6%)
+- outward_free mean: 14.6 → 7.4 (−49%)
+- outward_pinned mean: 57.3 → 55.0 (−4%)
+
+The GNN now beats both baselines on every aggregate metric for
+the first time. n=3 is now the default for training.
+
+Particularly notable: half_plane improved. This partially
+refutes O6's hypothesis that half_plane is purely architectural
+— more diverse mask exposure helps. Suggests room for further
+improvement via even higher augmentation (Candidate 3.5: n=5).
 
 ### Candidate 4 (Tier 2): Longer training with smaller LR
 
