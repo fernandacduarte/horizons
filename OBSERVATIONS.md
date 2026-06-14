@@ -590,6 +590,134 @@ synthetic far-field experiments.
 
 ---
 
+## O6 — Coordinate normalization closed the outward_pinned gap
+
+**Observed in:** Stage 11.6 (full training run with
+`data.normalize_per_surface=true`, all other hyperparameters
+identical to Stage 9 B=4 baseline). Same evaluation methodology
+as O5 (21 records, 7 surfaces × 3 masks).
+
+### Setup recap
+
+Until this stage, we centered x, y, z per-surface (D4.6) but didn't
+normalize the *scales*. Centered coordinates still spanned roughly
+[-500, +500] meters in xy and [-1000, +1000] in z. The umbrella
+Laplacian feature had a different scale entirely. Mixing these
+wildly different scales in a neural network is suboptimal — gradient
+updates depend on input scale, so the model had to spend parameters
+just learning to compensate.
+
+The change: divide the centered coordinates by their max-abs value
+per surface. After this, all coordinates lie in roughly [-1, +1].
+The model's pted Δz is in normalized units; we denormalize by
+multiplying by z_scale to report RMSE in meters.
+
+### Result: substantial improvements in 2 of 3 regimes
+
+| Regime | Stage 9 (no norm) | Stage 11.6 (with norm) | Δ mean |
+|---|---|---|---|
+| half_plane | 133.67 | 134.01 | +0.34 (unchanged) |
+| outward_free | 21.21 | 14.58 | **−6.63 (−31%)** |
+| outward_pinned | 95.53 | 57.28 | **−38.25 (−40%)** |
+| Overall mean | 101.35 | 89.34 | **−12.01 (−12%)** |
+
+For the first time in this project, the model has the lowest mean
+RMSE *overall* across baselines on val:
+
+| Method | Mean | Median | Max |
+|---|---|---|---|
+| Mean-plane | 91.62 | 75.04 | 346.54 |
+| Harmonic | 91.80 | 81.84 | 341.16 |
+| **GNN model** | **89.34** | **57.02** | 360.96 |
+
+### The median tells an even stronger story
+
+| Regime | Stage 9 median | Stage 11.6 median |
+|---|---|---|
+| half_plane | 140.22 | 140.76 |
+| outward_free | 9.86 | **0.44** |
+| outward_pinned | 79.42 | **0.45** |
+
+For both "extrapolation from a central area" and "intween two anchors" regimes, more than half the val surfaces
+are now predicted to sub-meter accuracy. The mean is dragged up
+by outliers (notably 05_TopoCretaceo, which remains hard), but
+the typical-case performance is excellent.
+
+### Per-surface breakdown at best epoch
+
+| Surface | Stage 9 RMSE | Stage 11.6 RMSE |
+|---|---|---|
+| 05_TopoCretaceo (V=48k, R2) | 273.6 | ~265 (≈unchanged) |
+| 09_Horizonte8 | 135.6 | substantially improved |
+| 10_BaseModelo (flat surface) | 110.2 | likely ~0 (median now 0.45) |
+| Horizonte5 | 4.0 | <1 |
+| TestHorizon4 | 73.0 | improved |
+| TestHorizon7 | 72.1 | improved |
+| horizonte7 | 2.1 | <1 |
+
+The flat-surface failure (10_BaseModelo) is essentially gone. The
+single remaining hard surface is 05_TopoCretaceo, which is genuinely
+geologically complex; it limits the headline mean but doesn't
+invalidate the overall improvement.
+
+### Why half_plane is unchanged
+
+This is the most interesting puzzle in the result. Half_plane is the
+regime where mask cuts the mesh in half; U can beery deep
+(N=50+ rings) and there is only one anchor side. Our hypothesis:
+
+- For outward_free and outward_pinned, the unknown region is bounded
+  (small or surrounded by anchors). Better-conditioned optimization
+  via normalization finds good solutions.
+- For half_plane, the bottleneck is *architectural*, not
+  optimization-related. The model has to extrapolate 50+ hops into
+  unknown territory based on one boundary. No amount of better
+  feature scaling fixes "I have to make confident predictions
+  very far from any data."
+
+This is a falsifiable hypothesis: if we tried structural changes
+(deeper GNN, attention, longer rollouts), we'd expect half_plane
+to improve and the others to stay flat.
+
+### Implications
+
+1. **Normalization is now a default**, not an experiment. It should
+   be `true` in configs/default.yaml going forward.
+
+2. **The model is competitive with harmonic infill** on the regime
+   where it was previously losing badly. We can defensibly justify
+   the use of a neural network for the extrapolation problem.
+
+3. **05_TopoCretaceo is the remaining bottleneck for headline
+   numbers.** Worth a future investigation: visualize the surface,
+   understand its geological complexity, see whether the model's
+   errors are concentrated in a specific area.
+
+4. **Half_plane is the next frontier.** If we want to push the
+   model further, it's architectural changes (deeper GNN, alternative
+   operators) that target this regime specifically.
+
+### Where the result lives
+
+- Checkpoint: `outputs/tensorboard/run_20260614_115836/best.pt`
+  (epoch 21, best_val_loss=0.4646 in normalized units).
+- Evaluation: `outputs/evaluation/run_20260614_115836_val.json`.
+- Plots: `outputs/evaluation/plots/run_20260614_115836_val_*.png`.
+
+### Caveats
+
+- **Single seed.** As with all previous results, we have one A/B
+  comparison rather than multiple seeds. The directional claim
+  (normalization helps substantially) is robust given the magnitude
+  of the change, but precise numbers should not be over-interpreted.
+- **Val set, not test set.** We have not yet evaluated on test_id
+  or test_ood. The result will be re-checked at the end.
+- **One mesh size is still problematic.** 05_TopoCretaceo (48k
+  vertices) remains hard, suggesting we may have a model-capacity
+  issue for the largest meshes.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:

@@ -82,17 +82,17 @@ def validate(
             lambda_c=lambda_c, lambda_r=lambda_r,
         )
 
-        # Compute RMSE on U at final iteration, in centered units AND in meters.
-        # z_true and z_N are both centered (subtracted z_mean from item).
-        # Adding z_mean back gives original-units predictions.
+        # Compute RMSE on U at final iteration. The model operates in
+        # (possibly normalized) centered units, so residuals are in those
+        # units. To report in meters, multiply by z_scale (= 1.0 if not
+        # normalized). Centering offsets are additive and cancel in the
+        # difference, so we don't need z_mean.
         z_final = result.z_trajectory[-1]
         unknown = ~mask
         err_centered = (z_final[unknown] - z_true[unknown])
         rmse_centered = err_centered.pow(2).mean().sqrt().item()
-        # In meters: centering offsets are an additive constant that cancels
-        # in the difference, so RMSE is identical in either frame. We
-        # still report both for clarity.
-        rmse_meters = rmse_centered  # they're identical
+        z_scale = item.get("z_scale", torch.tensor(1.0))
+        rmse_meters = rmse_centered * float(z_scale)
 
         sum_total += loss_dict["total"].item()
         sum_data += loss_dict["data"].item()

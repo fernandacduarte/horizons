@@ -53,6 +53,7 @@ class TestBasic:
             "mask", "d", "N",
             "z0", "z_true",
             "xy_mean", "z_mean",
+            "xy_scale", "z_scale",
             "surface_id", "reservoir_id", "regime",
         }
         assert set(item.keys()) == expected_keys

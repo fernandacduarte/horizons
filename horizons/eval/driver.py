@@ -19,7 +19,7 @@ from horizons.data.masking import MaskSampler, MaskSamplerConfig
 from horizons.data.init import init_z
 from horizons.data.mesh import HorizonSurface
 from horizons.eval.per_surface import evaluate_surface
-from horizons.eval.harmonic_infill import harmonic_infill
+from horizons.data.harmonic_infill import harmonic_infill
 
 
 @dataclass
@@ -59,6 +59,7 @@ def evaluate_split(
     base_seed: int = 1000,
     mask_config: MaskSamplerConfig | None = None,
     device: str | torch.device = "cpu",
+    normalize_per_surface: bool = False,
 ) -> EvalResult:
     """Evaluate model + baselines on every surface in a split, with
     multiple mask samples per surface.
@@ -91,6 +92,7 @@ def evaluate_split(
             # centering and per-ring breakdown).
             model_result = evaluate_surface(
                 model, surface, sampler, rng_seed=seed, device=device,
+                normalize_per_surface=normalize_per_surface,
             )
 
             # Now compute baselines on the SAME mask. We have to re-sample

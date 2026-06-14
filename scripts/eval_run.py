@@ -20,10 +20,21 @@ import argparse
 import subprocess
 from pathlib import Path
 
+import yaml
+
 from horizons.eval.checkpoint import load_checkpoint
 from horizons.eval.driver import (
     evaluate_split, aggregate_by_regime, aggregate_overall, save_result,
 )
+
+
+def read_run_config(run_dir: Path) -> dict:
+    """Read the config.yaml snapshot stored alongside the checkpoint."""
+    cfg_path = run_dir / "config.yaml"
+    if not cfg_path.exists():
+        return {}
+    with open(cfg_path) as f:
+        return yaml.safe_load(f)
 
 
 def main() -> None:
@@ -43,10 +54,19 @@ def main() -> None:
     # Run evaluation
     print(f"Evaluating on {args.split} split "
           f"({args.n_masks} masks per surface)...")
+    cfg = read_run_config(args.run_dir)
+    normalize_per_surface = (
+        cfg.get("data", {}).get("normalize_per_surface", False)
+    )
+    if normalize_per_surface:
+        print("  detected normalization=True from config.yaml")
+    print()
+
     result = evaluate_split(
         ckpt.model, args.split,
         n_masks_per_surface=args.n_masks,
         base_seed=args.base_seed,
+        normalize_per_surface=normalize_per_surface,
     )
 
     # Save JSON

@@ -14,6 +14,7 @@ seed: 42
 data:
   surfaces_dir: data/surfaces        # processed mesh files live here
   split_file: data/splits/split_v1.json
+  normalize_per_surface: true        # Stage 11.6 / Candidate 9: closed the outward_pinned gap (O6)
 
 # --------------------------------------------------------
 # Mask sampler (Stage 2)

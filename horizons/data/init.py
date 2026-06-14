@@ -82,7 +82,7 @@ def fit_mean_plane(
 def init_z(
     V: torch.Tensor, mask: torch.Tensor,
 ) -> torch.Tensor:
-    """Build z^0 for the rollout.
+    """Build z^0 for the rollout using mean plane.
 
     On known vertices, z^0 = z_true (the actual depth).
     On unknown vertices, z^0 = a*x + b*y + c from the mean plane fit through K.
@@ -122,3 +122,90 @@ def init_z(
     z0[~mask] = z_U_init
 
     return z0
+
+
+def harmonic_init(
+    V: torch.Tensor, mask: torch.Tensor, edge_index: torch.Tensor,
+) -> torch.Tensor:
+    """Build z^0 for the rollout using harmonic infill.
+
+    On known vertices, z^0 = z_true (the actual depth).
+    On unknown vertices, z^0 = harmonic infill solution given z[K].
+
+    This is mathematically equivalent to applying harmonic_infill() to
+    the true z values, then using that as the starting point for the
+    learned operator. The operator only has to predict the *residual*
+    from a strong baseline rather than learning extrapolation from
+    scratch.
+
+    Parameters
+    ----------
+    V : torch.Tensor, shape (n_vertices, 3), float
+        Vertex positions. V[:, 2] holds the true z values.
+    mask : torch.Tensor, shape (n_vertices,), bool
+        True for known vertices.
+    edge_index : torch.Tensor, shape (2, n_directed_edges), int64
+        Graph connectivity for the mesh.
+
+    Returns
+    -------
+    z0 : torch.Tensor, shape (n_vertices,), float
+        Same dtype as V.
+
+    Notes
+    -----
+    Computing harmonic infill requires solving a sparse linear system
+    of size |U| × |U|. For meshes with |V| around 50k and typical
+    mask sizes, this is roughly 1-2 seconds. If this becomes a
+    bottleneck during training, we can consider caching per-(surface, seed)
+    in the dataset.
+    """
+    # Local import to avoid a circular dependency if data/__init__.py
+    # ever starts pulling everything in.
+    from horizons.data.harmonic_infill import harmonic_infill
+
+    if V.dim() != 2 or V.shape[1] != 3:
+        raise ValueError(f"V must have shape (n, 3); got {tuple(V.shape)}")
+    if mask.shape != (V.shape[0],):
+        raise ValueError(
+            f"mask shape {tuple(mask.shape)} doesn't match V's vertex count {V.shape[0]}"
+        )
+    if mask.dtype != torch.bool:
+        raise TypeError(f"mask must be bool; got {mask.dtype}")
+
+    z_true = V[:, 2]
+    z0 = harmonic_infill(z_true, edge_index, mask)
+    return z0.to(dtype=V.dtype)
+
+
+def init_z_dispatch(
+    V: torch.Tensor,
+    mask: torch.Tensor,
+    edge_index: torch.Tensor | None = None,
+    *,
+    method: str = "meanplane",
+) -> torch.Tensor:
+    """Build z^0 using the requested initialization method.
+
+    Parameters
+    ----------
+    V : (n, 3) vertex positions.
+    mask : (n,) bool, True for known vertices.
+    edge_index : (2, n_directed_edges) int64, required only for harmonic init.
+    method : "meanplane" or "harmonic".
+
+    Returns
+    -------
+    z0 : (n,) float, same dtype as V.
+    """
+    if method == "meanplane":
+        return init_z(V, mask)
+    if method == "harmonic":
+        if edge_index is None:
+            raise ValueError(
+                "harmonic init requires edge_index; got None."
+            )
+        return harmonic_init(V, mask, edge_index)
+    raise ValueError(
+        f"Unknown init method {method!r}; expected 'meanplane' or 'harmonic'."
+    )

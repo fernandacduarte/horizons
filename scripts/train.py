@@ -34,8 +34,14 @@ def main(cfg: DictConfig) -> None:
 
     # Build datasets
     mask_cfg = MaskSamplerConfig.from_dictconfig(cfg.mask)
-    train_ds = load_split_dataset("train", mask_config=mask_cfg)
-    val_ds = load_split_dataset("val", mask_config=mask_cfg)
+    train_ds = load_split_dataset(
+        "train", mask_config=mask_cfg,
+        normalize_per_surface=cfg.data.normalize_per_surface,
+    )
+    val_ds = load_split_dataset(
+        "val", mask_config=mask_cfg,
+        normalize_per_surface=cfg.data.normalize_per_surface,
+    )
 
     # Build model
     model_kind = cfg.model_kind

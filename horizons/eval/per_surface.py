@@ -70,6 +70,7 @@ def evaluate_surface(
     rng_seed: int,
     *,
     center_per_surface: bool = True,
+    normalize_per_surface: bool = False,
     device: str | torch.device = "cpu",
 ) -> SurfaceEvalResult:
     """Run the model on one surface and compute per-ring metrics.
@@ -114,6 +115,22 @@ def evaluate_surface(
     else:
         V_centered = surface.V
 
+    # Apply per-surface normalization (same logic as HorizonDataset)
+    if normalize_per_surface:
+        if not center_per_surface:
+            raise ValueError(
+                "normalize_per_surface requires center_per_surface=True"
+            )
+        xy_scale = V_centered[:, :2].to(torch.float64).abs().max().item()
+        z_scale = V_centered[mask, 2].to(torch.float64).abs().max().item()
+        xy_scale = max(xy_scale, 1.0)
+        z_scale = max(z_scale, 1.0)
+        V_centered = V_centered.clone()
+        V_centered[:, :2] = V_centered[:, :2] / xy_scale
+        V_centered[:, 2] = V_centered[:, 2] / z_scale
+    else:
+        z_scale = 1.0
+
     z0 = init_z(V_centered, mask)
     N = int(d.max().item())
 
@@ -139,11 +156,13 @@ def evaluate_surface(
     residuals_U = (z_final[unknown] - z_true[unknown]).cpu()
     d_U = d[unknown].cpu()
 
-    # Overall RMSE. Note: centering doesn't change RMSE since both
-    # z_final and z_true were centered by the same constant.
-    rmse_overall = residuals_U.pow(2).mean().sqrt().item()
+    # Overall RMSE in METERS. Centering is an additive shift (cancels in
+    # the difference), but normalization is a multiplicative scale, so we
+    # multiply by z_scale to get back to meters. When not normalized,
+    # z_scale = 1.0 and this is identical to the previous behavior.
+    rmse_overall = residuals_U.pow(2).mean().sqrt().item() * z_scale
 
-    # Per-ring RMSE
+    # Per-ring RMSE (also in meters)
     rmse_per_ring: list[float] = []
     ring_sizes: list[int] = []
     for k in range(1, N + 1):
@@ -151,7 +170,7 @@ def evaluate_surface(
         n_in_ring = ring_mask.sum().item()
         ring_sizes.append(int(n_in_ring))
         if n_in_ring > 0:
-            ring_rmse = residuals_U[ring_mask].pow(2).mean().sqrt().item()
+            ring_rmse = residuals_U[ring_mask].pow(2).mean().sqrt().item() * z_scale
         else:
             ring_rmse = float("nan")
         rmse_per_ring.append(ring_rmse)

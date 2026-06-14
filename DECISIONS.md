@@ -948,7 +948,95 @@ cache it. Also: harmonic infill needs the FULL z_true on K to
 compute, but during training the K varies per epoch. We need to
 recompute harmonic infill per mask, not per surface.
 
-**Results:** _(to be filled in)_
+**Preliminary investigation (Stage 11.5.1):** Before training, we
+compared harmonic vs mean-plane init RMSE on val surfaces across
+all three regimes (21 records: 7 surfaces × 3 masks). Finding:
+harmonic init is NOT universally better.
+
+| Regime | meanplane init RMSE | harmonic init RMSE | Gap |
+|---|---|---|---|
+| half_plane (8 non-flat records) | ~150 | ~190 | harmonic 40 worse |
+| outward_free (1 non-flat) | 77 | 92 | harmonic 15 worse |
+| outward_pinned (2 non-flat) | 178 | 97 | harmonic 81 better |
+
+Harmonic init starts the model substantially BETTER on
+`outward_pinned` (interpolation between anchors, where harmonic's
+smoothness assumption is right) but WORSE on `half_plane` and
+`outward_free` (extrapolation regimes, where the truth has
+non-harmonic global trends that harmonic infill suppresses).
+
+**Implication:** A universal switch to harmonic init might hurt
+`half_plane` performance while helping `outward_pinned`. The
+honest expectation is mixed: the model would need to learn to
+"undo" the smoothness bias on extrapolation regimes.
+
+**Decision:** Defer running Candidate 2 until after Candidate 9
+(coordinate normalization). The reasoning: normalization is a
+more fundamental fix that should improve all regimes; once that's
+in place, we can revisit Candidate 2 with a better baseline.
+
+**Results:** _(deferred, see Candidate 9 first)_
+
+### Candidate 9 (NEW — Tier 1): Coordinate normalization
+
+**Hypothesis:** Currently we center x, y, z per surface (D4.6,
+Stage 8.1) but don't normalize the scales. After centering,
+coordinates still span roughly [-500, +500] meters in x, y and
+[-1000, +1000] in z. The umbrella Laplacian feature has a
+different scale entirely (z / length²). Mixing these wildly
+different scales in a neural network is suboptimal — gradient
+updates depend on input scale, so the model has to spend
+parameters learning to compensate for scale differences.
+
+Normalizing all spatial coordinates to roughly [-1, +1] per
+surface should:
+1. Make features uniform in scale → better-conditioned
+   optimization.
+2. Make the model scale-invariant → same architecture handles
+   surfaces of any geographic extent.
+3. Improve numerical stability → no precision issues.
+
+**Plan:**
+- Add `xy_scale` and `z_scale` to `HorizonDataset` output (the
+  L∞ extent of each coordinate, computed per surface).
+- Normalize V[:, :2] by dividing by xy_scale, V[:, 2] by z_scale.
+- The model's output Δz is in normalized units; we denormalize
+  by multiplying by z_scale before computing RMSE in meters.
+- Update `validate()` and `evaluate_surface()` to handle the
+  denormalization consistently.
+
+**Diagnostic:** Watch the training curves. Normalization should
+make all loss components more similar in scale (currently
+loss_data is millions, loss_curv is thousands). The model should
+also train more uniformly across regimes (less per-surface RMSE
+variance once everything is in O(1)).
+
+**Risk:**
+- The xy_scale and z_scale are per-surface, so the model's
+  predictions are now also per-surface scale. We have to
+  denormalize correctly when reporting in meters.
+- The curvature feature scaling changes too. We may need to
+  recompute the umbrella Laplacian after normalization (it's
+  a function of z, not just connectivity).
+- All metric values (RMSE in m) become invariant under
+  normalization, but intermediate "loss numbers" in TensorBoard
+  will shift. We should retain the meters scale for RMSE.
+
+**Results (Stage 11.6):** **Substantial win.** Full results in
+OBSERVATIONS.md O6. Summary:
+- overall mean RMSE: 101.4 → 89.3 (−12%)
+- outward_pinned mean: 95.5 → 57.3 (−40%)
+- outward_free mean: 21.2 → 14.6 (−31%)
+- half_plane: essentially unchanged
+- median RMSE on outward_pinned: 79 → 0.45 (most surfaces
+  now solved to sub-meter accuracy)
+
+The GNN model now has the lowest overall mean across the three
+methods evaluated (vs mean-plane and harmonic). Normalization
+is adopted as default. The remaining limitation is
+half_plane, which we hypothesize is architectural rather than
+optimization-related (the deep-extrapolation problem cannot be
+fixed by better feature scaling alone).
 
 ### Candidate 3 (Tier 2): Mask augmentation
 

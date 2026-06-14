@@ -55,6 +55,14 @@ class HorizonDataset(Dataset):
         mean; z centered by the mean over known vertices (using z[U]
         would leak ground truth). See D4.6. Default True; set False for
         tests that compare against uncentered fixtures.
+    normalize_per_surface : bool, default False
+        Whether to additionally scale (x, y, z) so that the centered
+        coordinates lie in [-1, +1] per surface. x, y use the global
+        max abs value; z uses the max abs value over known vertices
+        only (same no-leakage invariant as centering). When enabled,
+        downstream RMSE computations must denormalize by multiplying
+        by z_scale to report in physical units. Default False to
+        preserve backward compatibility.
     """
 
     def __init__(
@@ -64,14 +72,20 @@ class HorizonDataset(Dataset):
         split: str,
         initial_epoch: int = 0,
         center_per_surface: bool = True,
+        normalize_per_surface: bool = False,
     ) -> None:
         if len(surfaces) == 0:
             raise ValueError("HorizonDataset must be non-empty")
+        if normalize_per_surface and not center_per_surface:
+            raise ValueError(
+                "normalize_per_surface requires center_per_surface=True"
+            )
         self.surfaces = surfaces
         self.mask_sampler = mask_sampler
         self.split = split
         self._epoch = initial_epoch
         self.center_per_surface = center_per_surface
+        self.normalize_per_surface = normalize_per_surface
 
     def set_epoch(self, epoch: int) -> None:
         """Called at the start of each training epoch so masks resample.
@@ -108,6 +122,29 @@ class HorizonDataset(Dataset):
             xy_mean = torch.zeros(2, dtype=surface.V.dtype)
             z_mean = surface.V.new_zeros(())
 
+        # Per-surface normalization (Candidate 9, Stage 11.6).
+        # Scale all coordinates so the centered data lies in roughly
+        # [-1, +1]. The xy_scale uses ALL vertices since x, y are known.
+        # The z_scale uses ONLY z[K] to maintain the no-leakage invariant.
+        # Same float64 promotion trick as fit_mean_plane for stability.
+        if self.normalize_per_surface:
+            xy_scale = V_centered[:, :2].to(torch.float64).abs().max().item()
+            z_scale = V_centered[mask, 2].to(torch.float64).abs().max().item()
+            # Guard against degenerate (zero-extent) surfaces by flooring
+            # the scale to 1.0. This means truly flat surfaces (z_range=0)
+            # don't get divided by zero; their normalized z is just their
+            # actual z, which is fine because it's already zero anyway.
+            xy_scale = max(xy_scale, 1.0)
+            z_scale = max(z_scale, 1.0)
+            V_centered = V_centered.clone()
+            V_centered[:, :2] = V_centered[:, :2] / xy_scale
+            V_centered[:, 2] = V_centered[:, 2] / z_scale
+            xy_scale_tensor = torch.tensor(xy_scale, dtype=surface.V.dtype)
+            z_scale_tensor = torch.tensor(z_scale, dtype=surface.V.dtype)
+        else:
+            xy_scale_tensor = torch.tensor(1.0, dtype=surface.V.dtype)
+            z_scale_tensor = torch.tensor(1.0, dtype=surface.V.dtype)
+
         z0 = init_z(V_centered, mask)
 
         return {
@@ -125,6 +162,9 @@ class HorizonDataset(Dataset):
             # Centering offsets (for inverting the prediction back to original frame)
             "xy_mean": xy_mean,              # (2,) float
             "z_mean": z_mean if isinstance(z_mean, torch.Tensor) else torch.tensor(z_mean),
+            # Normalization scales (for denormalizing predictions back to meters)
+            "xy_scale": xy_scale_tensor,     # () float
+            "z_scale": z_scale_tensor,       # () float
             # Metadata
             "surface_id": surface.surface_id,
             "reservoir_id": surface.reservoir_id,
@@ -160,6 +200,7 @@ def load_split_dataset(
     surfaces_dir: str | Path = "data/surfaces",
     split_file: str | Path = "data/splits/split_v1.json",
     center_per_surface: bool = True,
+    normalize_per_surface: bool = False,
 ) -> HorizonDataset:
     """Build a HorizonDataset for one of the real-data splits.
 
@@ -177,4 +218,5 @@ def load_split_dataset(
     return HorizonDataset(
         surfaces, sampler, split=split_name,
         center_per_surface=center_per_surface,
+        normalize_per_surface=normalize_per_surface,
     )

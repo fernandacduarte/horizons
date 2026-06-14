@@ -7,7 +7,7 @@ import torch
 from horizons.data.mesh import HorizonSurface
 from horizons.data.masking import MaskSampler, MaskSamplerConfig
 from horizons.data.features import compute_umbrella_laplacian
-from horizons.eval.harmonic_infill import harmonic_infill
+from horizons.data.harmonic_infill import harmonic_infill
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
