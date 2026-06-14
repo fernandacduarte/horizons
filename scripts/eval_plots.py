@@ -20,6 +20,7 @@ import numpy as np
 
 from horizons.eval.driver import load_result, aggregate_by_regime, EvalResult
 
+# For now (13/06/26), our best checkpoint: "outputs/tensorboard/run_20260609_092252/best.pt"
 
 # Color scheme — consistent across all plots
 COLOR_MEANPLANE = "#7f7f7f"  # gray
