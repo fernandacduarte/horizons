@@ -60,6 +60,7 @@ def evaluate_split(
     mask_config: MaskSamplerConfig | None = None,
     device: str | torch.device = "cpu",
     normalize_per_surface: bool = False,
+    init_method: str = "meanplane",
 ) -> EvalResult:
     """Evaluate model + baselines on every surface in a split, with
     multiple mask samples per surface.
@@ -93,6 +94,7 @@ def evaluate_split(
             model_result = evaluate_surface(
                 model, surface, sampler, rng_seed=seed, device=device,
                 normalize_per_surface=normalize_per_surface,
+                init_method=init_method,
             )
 
             # Now compute baselines on the SAME mask. We have to re-sample

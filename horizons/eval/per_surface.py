@@ -15,7 +15,7 @@ import torch
 
 from horizons.data.mesh import HorizonSurface
 from horizons.data.masking import MaskSampler
-from horizons.data.init import init_z
+from horizons.data.init import init_z, init_z_dispatch
 from horizons.training.rollout import rollout
 
 
@@ -71,6 +71,7 @@ def evaluate_surface(
     *,
     center_per_surface: bool = True,
     normalize_per_surface: bool = False,
+    init_method: str = "meanplane",
     device: str | torch.device = "cpu",
 ) -> SurfaceEvalResult:
     """Run the model on one surface and compute per-ring metrics.
@@ -131,7 +132,9 @@ def evaluate_surface(
     else:
         z_scale = 1.0
 
-    z0 = init_z(V_centered, mask)
+    z0 = init_z_dispatch(
+        V_centered, mask, surface.edge_index, method=init_method,
+    )
     N = int(d.max().item())
 
     # Move to device

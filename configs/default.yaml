@@ -15,6 +15,7 @@ data:
   surfaces_dir: data/surfaces        # processed mesh files live here
   split_file: data/splits/split_v1.json
   normalize_per_surface: true        # Stage 11.6 / Candidate 9: closed the outward_pinned gap (O6)
+  init_method: meanplane             # Stage 11.5 / Candidate 2: 'meanplane' or 'harmonic'
 
 # --------------------------------------------------------
 # Mask sampler (Stage 2)
@@ -96,6 +97,7 @@ train:
   val_every: 1                       # epochs between validation passes
   log_every_steps: 10                # print a status line every N optimizer steps
   device: cpu                        # cpu | mps | cuda (training device)
+  best_metric: val_rmse_meters       # val_loss | val_rmse_meters
 
   log_dir: outputs/tensorboard
   ckpt_dir: outputs/checkpoints

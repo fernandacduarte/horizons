@@ -15,7 +15,7 @@ from torch.utils.data import Dataset
 
 from horizons.data.mesh import HorizonSurface
 from horizons.data.masking import MaskSampler, MaskSamplerConfig
-from horizons.data.init import init_z
+from horizons.data.init import init_z, init_z_dispatch
 
 
 def _make_rng(surface_id: str, epoch: int, split: str) -> torch.Generator:
@@ -73,6 +73,7 @@ class HorizonDataset(Dataset):
         initial_epoch: int = 0,
         center_per_surface: bool = True,
         normalize_per_surface: bool = False,
+        init_method: str = "meanplane",
     ) -> None:
         if len(surfaces) == 0:
             raise ValueError("HorizonDataset must be non-empty")
@@ -80,12 +81,17 @@ class HorizonDataset(Dataset):
             raise ValueError(
                 "normalize_per_surface requires center_per_surface=True"
             )
+        if init_method not in ("meanplane", "harmonic"):
+            raise ValueError(
+                f"init_method must be 'meanplane' or 'harmonic'; got {init_method!r}"
+            )
         self.surfaces = surfaces
         self.mask_sampler = mask_sampler
         self.split = split
         self._epoch = initial_epoch
         self.center_per_surface = center_per_surface
         self.normalize_per_surface = normalize_per_surface
+        self.init_method = init_method
 
     def set_epoch(self, epoch: int) -> None:
         """Called at the start of each training epoch so masks resample.
@@ -145,7 +151,9 @@ class HorizonDataset(Dataset):
             xy_scale_tensor = torch.tensor(1.0, dtype=surface.V.dtype)
             z_scale_tensor = torch.tensor(1.0, dtype=surface.V.dtype)
 
-        z0 = init_z(V_centered, mask)
+        z0 = init_z_dispatch(
+            V_centered, mask, surface.edge_index, method=self.init_method,
+        )
 
         return {
             # Mesh (V is centered if center_per_surface=True)
@@ -201,6 +209,7 @@ def load_split_dataset(
     split_file: str | Path = "data/splits/split_v1.json",
     center_per_surface: bool = True,
     normalize_per_surface: bool = False,
+    init_method: str = "meanplane",
 ) -> HorizonDataset:
     """Build a HorizonDataset for one of the real-data splits.
 
@@ -219,4 +228,5 @@ def load_split_dataset(
         surfaces, sampler, split=split_name,
         center_per_surface=center_per_surface,
         normalize_per_surface=normalize_per_surface,
+        init_method=init_method,
     )

@@ -37,10 +37,12 @@ def main(cfg: DictConfig) -> None:
     train_ds = load_split_dataset(
         "train", mask_config=mask_cfg,
         normalize_per_surface=cfg.data.normalize_per_surface,
+        init_method=cfg.data.init_method,
     )
     val_ds = load_split_dataset(
         "val", mask_config=mask_cfg,
         normalize_per_surface=cfg.data.normalize_per_surface,
+        init_method=cfg.data.init_method,
     )
 
     # Build model
@@ -95,6 +97,7 @@ def main(cfg: DictConfig) -> None:
             patience=cfg.train.patience,
             checkpoint_path=str(checkpoint_path),
             accum_steps=cfg.optim.accum_steps,
+            best_metric=cfg.train.best_metric,
         )
     finally:
         writer.close()
@@ -116,7 +119,7 @@ def main(cfg: DictConfig) -> None:
         json.dump(summary, f, indent=2)
 
     print("Training complete.")
-    print(f"Best val loss: {state.best_val_loss:.4f} at epoch {state.best_val_epoch}.")
+    print(f"Best {state.best_metric_name}: {state.best_metric_value:.4f} at epoch {state.best_val_epoch}.")
 
 
 if __name__ == "__main__":

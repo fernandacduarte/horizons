@@ -58,8 +58,11 @@ def main() -> None:
     normalize_per_surface = (
         cfg.get("data", {}).get("normalize_per_surface", False)
     )
+    init_method = cfg.get("data", {}).get("init_method", "meanplane")
     if normalize_per_surface:
         print("  detected normalization=True from config.yaml")
+    if init_method != "meanplane":
+        print(f"  detected init_method={init_method!r} from config.yaml")
     print()
 
     result = evaluate_split(
@@ -67,6 +70,7 @@ def main() -> None:
         n_masks_per_surface=args.n_masks,
         base_seed=args.base_seed,
         normalize_per_surface=normalize_per_surface,
+        init_method=init_method,
     )
 
     # Save JSON

@@ -82,6 +82,8 @@ class TrainState:
     step: int = 0
     best_val_loss: float = float("inf")
     best_val_epoch: int = -1
+    best_metric_value: float = float("inf")
+    best_metric_name: str = "val_loss"
     train_history: list[dict] = field(default_factory=list)
     val_history: list[dict] = field(default_factory=list)
     early_stopped: bool = False
@@ -113,6 +115,7 @@ def train(
     patience: int | None = None,
     checkpoint_path: str | Path | None = None,
     accum_steps: int = 1,
+    best_metric: str = "val_loss",
 ) -> TrainState:
     """Train a horizon-extrapolation model.
 
@@ -338,8 +341,23 @@ def train(
             }
             state.val_history.append(val_record)
 
-            is_new_best = val_record["loss_total"] < state.best_val_loss
+            # Map best_metric name to the key in val_record.
+            # "val_loss" tracks loss_total; "val_rmse_meters" tracks RMSE in meters.
+            metric_keys = {
+                "val_loss": "loss_total",
+                "val_rmse_meters": "rmse_meters",
+            }
+            if best_metric not in metric_keys:
+                raise ValueError(
+                    f"best_metric must be one of {list(metric_keys)}; "
+                    f"got {best_metric!r}"
+                )
+            current_metric = val_record[metric_keys[best_metric]]
+            state.best_metric_name = best_metric
+
+            is_new_best = current_metric < state.best_metric_value
             if is_new_best:
+                state.best_metric_value = current_metric
                 state.best_val_loss = val_record["loss_total"]
                 state.best_val_epoch = epoch
                 # Save best checkpoint
@@ -350,13 +368,18 @@ def train(
                         "epoch": epoch,
                         "step": state.step,
                         "best_val_loss": state.best_val_loss,
+                        "best_metric_value": state.best_metric_value,
+                        "best_metric_name": state.best_metric_name,
                         "train_history": state.train_history,
                         "val_history": state.val_history,
                     }
                     Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
                     torch.save(checkpoint, checkpoint_path)
                     if verbose:
-                        print(f"  saved checkpoint: {checkpoint_path}")
+                        print(
+                            f"  saved checkpoint: {checkpoint_path} "
+                            f"({best_metric}={current_metric:.4f})"
+                        )
 
             # TensorBoard: validation metrics
             if writer is not None:
@@ -392,7 +415,7 @@ def train(
                 if epochs_since_best >= patience:
                     state.early_stopped = True
                     state.early_stop_reason = (
-                        f"no val loss improvement for {epochs_since_best} "
+                        f"no {best_metric} improvement for {epochs_since_best} "
                         f"epochs (patience={patience})"
                     )
                     if verbose:
@@ -408,8 +431,6 @@ def train(
                     f"  val RMSE:   {val_record['rmse_meters']:.2f} m"
                     f"\n  elapsed:    {t_elapsed:.1f}s"
                 )
-                if val_record["loss_total"] == state.best_val_loss:
-                    print(f"  (new best val loss)")
                 print()
 
     return state
