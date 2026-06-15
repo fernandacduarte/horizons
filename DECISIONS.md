@@ -1141,7 +1141,17 @@ on the others.**
   bumping `--n-masks` from 3 to 10 for statistical power on the
   underrepresented outward_free regime.
 
-**Results:** _(to be filled in after Stage 11.10 finishes)_
+**Results (Stage 11.10):** Negative.
+With weights 20/60/20, every regime got slightly worse (-2 to -9m),
+including the targeted outward_free regime. Documented in O10.
+
+Hypothesis on why: regime diversity during training may matter for
+generalization, even when only one regime matters at deployment.
+Restricting mask geometry diversity may have narrowed the model's
+learned skills.
+
+**Decision:** Revert to 30/40/30 default regime weights. Stage 11.8
+remains the best model.
 
 ### Candidate 6 (Tier 3): Larger model
 
@@ -1260,6 +1270,66 @@ the training config's mask weights; it instantiates a default
 **Status:** Always fixed (this is how it was built); now explicitly
 documented because Stage 11.10's training/eval weight divergence
 makes it a deliberate design point rather than an accident.
+
+---
+
+## Stage 11.7 — Checkpoint selection metric
+
+### D11.7.1 — Use `val_rmse_meters` as the early-stop and best-checkpoint criterion
+
+**Decision:** During training, the best checkpoint and early-stop
+criterion are driven by **val_rmse_meters** (RMSE in meters on
+the held-out validation surfaces' unknown vertices), not val_loss.
+
+**Where:** `train.best_metric: val_rmse_meters` in
+`configs/default.yaml`. Implemented in `horizons/training/loop.py`.
+Selectable via CLI override if a comparison run is needed.
+
+**Why we changed from val_loss to val_rmse_meters:**
+
+1. **val_loss includes regularizer terms** (data fit + λ_s × smoothness +
+   λ_c × curvature + λ_r × residual norm). The regularizers add
+   per-step variance from their own gradient noise, not from
+   prediction quality. We saw this empirically in Stage 11.7 — the
+   model's val_loss pattern (epoch 3: 6.71, epoch 12:
+   8.19, epoch 24: 7.01) that masked underlying improvement in
+   val_rmse_meters.
+2. **val_rmse_meters is what we report.** Aligning the
+   checkpoint-selection criterion with the reported metric is more
+   honest than selecting by a composite signal we don't ultimately
+   evaluate against.
+3. **At inference time, only RMSE matters.** Users want accurate
+   predictions. Smoothness regularization shapes training but does
+   not feature in deployment-time evaluation.
+
+**Trade-offs we accept:**
+
+- val_rmse_meters optimizes data fit only; the selected checkpoint
+  may have slightly worse smoothness/curvature properties than one
+  selected by val_loss.
+- The smoothness/curvature penalties are still active **during
+  training** (the model is pushed toward smooth outputs at every
+  step), so the selected model is not maximally rough — it just
+  isn't *additionally* selected for smoothness at the final
+  checkpoint.
+- This trade is acceptable because (a) the reported metric is
+  RMSE(b) we have direct evidence that val_loss is noisier and
+  can mislead checkpoint selection.
+
+**For the thesis writeup:**
+
+A reasonable framing is: "We selected the best checkpoint by
+val_rmse_meters since this is our reported evaluation metric. The
+alternative would be a composite val_loss including the
+regularization penalties used during training; we chose val_rmse
+to align checkpoint selection with how the model is evaluated
+and how it will be used at inference. The regularizers remain
+active during training, ensuring the model converges toward smooth
+predictions, but they are not used as a selection criterion
+afterward."
+
+**Status:** In effect from Stage 11.7 onward. All subsequent runs
+use val_rmse_meters as the criterion.
 
 ---
 
