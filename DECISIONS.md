@@ -1095,18 +1095,53 @@ converged.
 
 **Results:** _(to be filled in)_
 
-### Candidate 5 (Tier 2): Rebalance regime weights toward `outward_pinned`
+### Candidate 5 (Tier 2): Rebalance regime weights toward `outward_free` (revised)
 
-**Hypothesis:** Currently regime weights are 30/40/30. If
-`outward_pinned` is the hardest regime, upweighting it during
-training (e.g., 25/30/45) would give the model more practice on it.
+**Original hypothesis** (pre-O8): Rebalance regime weights toward
+`outward_pinned`, since that was the regime where we trailed
+classical baselines.
 
-**Plan:** Change `MaskSamplerConfig` regime weights, retrain with
-otherwise the best config so far.
+**Revised hypothesis** (post-O8, post Stage 11.9): After conversation
+with the project owner about deployment scenarios, the priority
+changed. At inference time, the dominantse case is "extrapolate
+from a central observation region outward to a bounding box, with
+no anchors at the boundary" — which is precisely `outward_free`.
+Secondary cases involve boundary anchors (`outward_pinned`) or
+fault-like discontinuities (`half_plane`).
 
-**Risk:** Could overfit to one regime at the expense of others.
+This reframes the optimization target: **we should specialize the
+model toward `outward_free` while preserving reasonable performance
+on the others.**
 
-**Results:** _(to be filled in)_
+**Plan:**
+- Change regime weights from 30/40/30 to 20/60/20 (half_plane /
+  outward_free / outward_pinned).
+- Retrain with otherwise the best config so far (Stage 11.8: n=3,
+  lr=1e-3, normalize=true, init=meanplane).
+- Re-evaluate. The headline metric is now `outward_free mean RMSE`
+  rather than the overall mean.
+
+**Risk:**
+- half_plane and outward_pinned will likely get worse.
+- Acceptable if outward_free improves enough to make the trade
+  worthwhile for deployment.
+- Risk of overspecializing: if half_plane regresses dramatically
+  (e.g., above 200m mean), we may have gone too far.
+
+**Methodologal notes:**
+- The val sampler during training also uses the new weights, so the
+  val_rmse_meters that drives early-stopping is now biased toward
+  the deployment regime. This is *correct* — we want the model
+  selection criterion to track the regime we care about.
+- The post-training `evaluate_split` (in `eval_run.py`) keeps the
+  default 30/40/30 regime weights. This makes evaluation results
+  directly comparable across runs, even when training-time weights
+  differ.
+- See also the eval methodology change in Stage 11 (below) about
+  bumping `--n-masks` from 3 to 10 for statistical power on the
+  underrepresented outward_free regime.
+
+**Results:** _(to be filled in after Stage 11.10 finishes)_
 
 ### Candidate 6 (Tier 3): Larger model
 
@@ -1163,6 +1198,68 @@ If after all attempts, the model still loses to harmonic infill on
 deserves a clean writeup in the thesis: "neural networks add value
 in extrapolation regimes but not in interpolation regimes; for
 the latter, classical methods remain the right tool."
+
+---
+
+## Stage 11.10 — Evaluation methodology improvements
+
+### D11.10.1 — Bump default `n_masks_per_surface` for eval from 3 to 10
+**Decision:** When evaluating on val (or test), use 10 masks per
+surface by default, not 3.
+
+**Where:** `scripts/eval_run.py` CLI flag `--n-masks`. The default
+value of `n_masks_per_surface` in `evaluate_split()` remains 3 for
+backward compatibility with scripts that pass it explicitly, but
+the eval_run CLI now defaults to 10.
+
+**Why:**
+- With 7 val surfaces × 3 masks = 21 records and default regime
+  weights 30/40/30, the expected per-regime counts are ~6 / ~8 / ~6.
+  Actual counts vary due to sampling variance. In several
+  experiments we ended up with only **4 records** in `outward_free`
+  — barely enough to compute a mean, certainly not enough for
+  median or per-ring breakdowns.
+- With 10 masks per surface, toords grow to 70 and expected
+  per-regime counts are ~21 / ~28 / ~21. Outward_free becomes
+  statistically reliable.
+- Eval is fast (no backward pass, no gradient computation), so the
+  extra cost is small (~5-10 minutes instead of ~2 for val
+  evaluation).
+
+**Why not change `evaluate_split`'s default itself:** Existing test
+suites and historical experiments use n=3. Changing the function
+default would invalidate those. The CLI default change for `eval_run`
+covers the common case (interactive eval after training) while
+leaving the function contract intact.
+
+**Status:** Fixed for `eval_run.py` from Stage 11.10 onward.
+
+### D11.10.2 — Eval sampler keeps default regime weights regardless of training
+**Decision:** `evaluate_split()` uses `MaskSamplerConfig()` (default
+30/40/30 regime weights), independent of the training config.
+
+**Where:** `horizons/eval/driver.py::evaluate_split` does not read
+the training config's mask weights; it instantiates a default
+`MaskSamplerConfig`.
+
+**Why:**
+- Different training eeriments may use different regime weights
+  (e.g., Stage 11.10's 20/60/20 vs default 30/40/30). If the
+  evaluation also used the experimental weights, **per-regime mean
+  RMSE could not be directly compared across experiments** because
+  the mean would be over different subsets of (surface, mask) pairs.
+- By using the same eval distribution everywhere, the per-regime
+  mean RMSE is a comparable cross-experiment number.
+- The "fairness" concern (training on 20/60/20 but evaluating on
+  30/40/30) is illusory: the model's per-regime mean RMSE is a
+  property of the regime, not of how often the sampler picks it.
+  Re-weighting the sampler only changes the overall mean (which is
+  why the overall mean is no longer the headline metric in Stage
+  11.10).
+
+**Status:** Always fixed (this is how it was built); now explicitly
+documented because Stage 11.10's training/eval weight divergence
+makes it a deliberate design point rather than an accident.
 
 ---
 

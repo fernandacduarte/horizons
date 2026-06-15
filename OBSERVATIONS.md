@@ -943,6 +943,71 @@ The neural network is now defensibly justified across regimes:
 
 ---
 
+## O9 — n=5 augmentation with smaller LR: roughly tied with n=3, much slower
+
+**Observed in:** Stage 11.9 (full training run with `n_masks_per_epoch=5`,
+`lr=5e-4`, `patience=40`, `n_epochs=200`). Hypothesis: more
+augmentation + finer LR + more patience would push further than
+n=3.
+
+### Result: essentially flat
+
+| Regime | 11.8 (n=3) | 11.9 (n=5, lr=5e-4) | Δ |
+|---|---|---|---|
+| half_plane mean | 125.4 | 128.3 | +2.9 |
+| outward_free mean | 7.4 | 9.9 | +2.5 |
+| outward_pinned mean | 55.0 | 54.9 | −0.1 |
+| Overall mean | **82.8** | 84.8 | +2.0 |
+| Overall median | **38.3** | 38.4 | +0.1 |
+
+Stage 11.9 came in roughly tied with Stage 11.8, slightly worse on
+mean (+2m) and identical on median. The early-stop fired at epoch 65
+with best at epoch 25 (well within the patience budget). Train loss
+was still slowly descending while val plateaued around 70-75m —
+exactly t training pattern as 11.8, just stretched across
+more epochs.
+
+### What we learn
+
+**The data-diversity ceiling is at or near n=3.** Doubling
+augmentation (n=3 → n=5) didn't help. Tripling training time
+(2.5h → 9.didn't help. Halving the LR didn't help.
+
+This is informative: **the remaining gains are not in "more masks
+per epoch" or "longer training."** They're in something else —
+likely:
+- Different data composition (e.g., re-weighting regimes for
+  deployment focus, larger meshes brought back).
+- Architectural changes (deeper GNN, alternative orators).
+- Or we've genuinely reached the model's representational ceiling
+  for this dataset.
+
+### Implications
+
+- **Stage 11.8's hyperparameters (n=3, lr=1e-3, patience=20) are
+  near-optimal** for the current training data setup. We should
+  stop sweeping these.
+- **Future improvements need a different axis.** This is what
+  motivates Stage 11.10's regime re-weighting.
+
+### Where the result lives
+
+- Checkpoint: `outputs/tensorboard/run_20260614_191007/best.pt`
+  (epoch 25, best val_rmse_meters=62.72).
+- Evaluation: `outputs/evaluation/run_20260614_191007_val.json`.
+
+### Caveats
+
+- **Compute cost was a real factor in deciding to stop.** Stage 11.9
+  ran for ~9.7 hours. Each additional similar experiment doubles
+  the wall-clock investment for similar marginal returns. Time is
+  finite for thesis work.
+- **n=4 was not tested.** The jump n=3 → n=5 might have skipped a
+  point that would have helped. We're inferring monotonic
+  diminishing returns, which isn't guaranteed.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:
