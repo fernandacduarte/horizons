@@ -1008,6 +1008,152 @@ likely:
 
 ---
 
+## O10 — Regime re-weighting toward `outward_free` did not help (revised with n=10 eval)
+
+**Observed in:** Stage 11.10 (full training run with `mask.regime_weights`
+changed from 30/40/30 to 20/60/20). Re-evaluated with `--n-masks 10`
+(70 records: 7 surfaces × 10 masks) after the initial n=3 evaluation
+proved statistically unreliable.
+
+### Motivation recap
+
+The dominant inference scenario is `outward_free` (extrapolate from a
+central region to a bounding box, no boundary anchors). We re-weighted
+training masks 20/60/20 to give the model 3× more outward_free exposure,
+expecting outward_free RMSE to drop substantially.
+
+### Result with reliable evaluation (n=10 masks per surface)
+
+| Regime | 11.8 (30/40/30 train, n=10 eval) | 11.10 (20/60/20 train, n=10 eval) | Δ |
+|---|---|---|---|
+| half_plane mean | 71.4 | 77.6 | +6.2 (worse) |
+| outward_free mean | 76.9 | 80.8 | +3.9 (worse) |
+| outward_pinned mean | 73.5 | 81.0 | +7.5 (worse) |
+| Overall mean | **73.7** | 79.4 | +5.7 (worse) |
+
+Stage 11.10 is worse than Stage 11.8 on every regime, including the
+targeted outward_free regime. The directional conclusion of the
+original O10 (with n=3 evaluation) was correct, but the magnitudes
+were misleading — both runs looked worse on the small sample.
+
+### What we learn
+
+The hypothesis "the bottleneck on outward_free is insufficient
+training exposure" is **false** in our setup. Re-weighting helps not
+just outward_free but the other regimes too — and even outward_free
+itself didn't gain.
+
+Most plausible explanation: **the model benefits from regime diversity
+during training**, even when only one regime matters at deployment.
+Training mostly on outward_free (the 60% case in 11.10) may have
+caused the model to overfit to specific outward_free mask geometries
+rather than learning the generalizable extrapolation patterns that
+all regimes share. Half_plane and outward_pinned training were
+providing useful supervisory signal that we accidentally suppressed.
+
+### Decision
+
+**Stage 11.8 (30/40/30 regime weights) is the best model.** This is
+the configuration to use going forward. Stage 11.10 is preserved as
+a meaningful ablation showing that regime specialization doesn't
+help, even on the specialized regime.
+
+### Implications going forward
+
+- **Regime weights stay at 30/40/30.**
+- **Stop pursuing regime-weight tuning as a lever** — it doesn't help
+  in any direction we've explored.
+- **The remaining gains require structural changes** (architecture,
+  larger meshes brought back, etc.) — see DECISIONS.md Tier 3
+  candidates.
+- **Validate on test set.** Stage 11.8 is the final hyperparameter
+  configuration; the next step is to confirm its val performance
+  generalizes to held-out test_id and test_ood splits.
+
+### Where the result lives
+
+- Stage 11.10 checkpoint: `outputs/tensorboard/run_20260615_092535/best.pt`
+  (epoch 19, best val_rmse_meters=65.78).
+- n=10 evaluation: `outputs/evaluation/run_20260615_092535_val.json`.
+---
+
+## O11 — Per-regime statistics need ≥10 masks per surface for reliability
+
+**Observed in:** Stage 11.8 evaluation re-run with --n-masks 10 (versus
+the original --n-masks 3 default).
+
+### The finding
+
+Stage 11.8's "best" per-regime numbers shifted substantially when we
+moved from 3 masks per surface (21 records total) to 10 masks per
+surface (70 records total):
+
+| Regime | n=3 mean | n=10 mean | shift |
+|---|---|---|---|
+| half_plane | 125.4 | 71.4 | −54 (a lot) |
+| outward_free | 7.4 | 76.9 | **+70 (huge)** |
+| outward_pinned | 55.0 | 73.5 | +18 |
+| Overall | 82.8 | 73.7 | −9 |
+
+These are the same model evaluated on the same val surfaces. Only
+the sampling density changed.
+
+### What happened with outward_free
+
+With n=3, the 21 evaluation records broke down as 11/4/6 per regime.
+Three of the four outward_free records were on the same near-flat
+val surface (horizonte7, z_range=18m), which has very little to
+extrapolate. The mean was dragged down to 7.4m by these easy cases.
+
+With n=10, the 70 records break down as 31/23/16 per regime. The
+23 outward_free records cover all val surfaces multiple times,
+giving a representative mix of easy and hard cases. The mean
+rises to 76.9m — the honest number.
+
+### What happened with half_plane
+
+The reverse case. With n=3, half_plane happened to draw mostly
+hard records (mean 125.4). With n=10, the mix is more
+representative and the mean is more moderate (71.4).
+
+### General lesson
+
+When the val set has only 7 surfaces and you sample at random with
+regime probabilities 30/40/30, **per-regime sample sizes are too
+small for reliable statistics**. A handful of unlucky draws can
+shift a mean by 10× in either direction.
+
+**The fix is simple**: bump n_masks_per_surface to 10. The eval is
+fast (no gradient computation), so the extra compute is minor (a
+few minutes per evaluation).
+
+This is now the default in `scripts/eval_run.py` and is documented
+as D11.10.1 in DECISIONS.md.
+
+### Implications for the project
+
+- **All cross-experiment comparisons must use the same n_masks**.
+  Old eval JSON files (with n=3) should be regenerated with n=10
+  before being used for comparisons.
+- **The n=3 numbers in OBSERVATIONS.md O6, O7, O8 were misleadingly
+  precise** — qualitative directions were correct, but absolute
+  values shifted with the bigger sample. The headline numbers in
+  the thesis writeup should come from n=10 evaluations.
+- **The val set is fundamentally small** (7 surfaces). Even with
+  n=10 masks, we have only 7 *underlying surfaces* contributing to
+  each metric. Per-surface variance limits how precise any
+  aggregate can be. This is a real limitation of the dataset, not
+  fixable by sampling more masks.
+
+### Where the result lives
+
+- Stage 11.8 n=10 evaluation:
+  `outputs/evaluation/run_20260614_155745_val.json`.
+- Stage 11.10 n=10 evaluation:
+  `outputs/evaluation/run_20260615_092535_val.json`.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:
