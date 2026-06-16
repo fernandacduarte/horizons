@@ -1154,6 +1154,102 @@ as D11.10.1 in DECISIONS.md.
 
 ---
 
+## O12 — Larger model (hidden_dim=128) does not help: we are not capacity-limited
+
+**Observed in:** Stage 11.11 (full training run with
+`model.hidden_dim=128`, otherwise identical to Stage 11.8: n=3,
+lr=1e-3, normalize=true, init=meanplane, 30/40/30 regime weights).
+Parameter count grew from ~21k (hidden_dim=64) to ~84k
+(hidden_dim=128).
+
+### Result: essentially identical to Stage 11.8
+
+| Regime | 11.8 (hidden=64) | 11.11 (hidden=128) | Δ |
+|---|---|---|---|
+| half_plane mean | 71.4 | 69.3 | −2.1 (slightly better) |
+| outward_free mean | 76.9 | 77.2 | +0.3 (essentially same) |
+| outward_pinned mean | 73.5 | 73.8 | +0.3 (essentially same) |
+| Overall mean | **73.7** | **73.0** | −0.7 (<1% improvement) |
+
+All differences are **at or below the noise floor** of the val
+evaluation (7 underlying surfaces, per-surface RMSE varies by
+100m+). A 0.7m improvement in overall mean is not meaningful with
+this sample size.
+
+### Training-time vs evaluation-time numbers diverged
+
+The training-time best val_rmse_meters was 60.3 (Stage 11.11) vs
+64.6 (Stage 11.8) — a 4.3m apparent improvement. But the full
+evaluation with n=10 masks per surface showed essentially no
+difference (73.0 vs 73.7). This is consistent with the n_masks
+methodological lesson from O11: small samples can give misleading
+precision.
+
+### The conclusion
+
+**This is informative. It strongly suggests we are not
+capacity-limited. The bottleneck is data or architectural
+inductive biases, not model size.**
+
+Quadrupling the parameter count from 21k to 84k did not move the
+needle on val. If the model had been capacity-limited, this would
+have improved things; it didn't. Whatever's holding us back is
+not "the model is too small."
+
+### What the remaining bottleneck might be
+
+Plausible explanations, in rough order of likelihood:
+
+1. **Data diversity.** We train on 30 surfaces (10 V>50k surfaces
+   set aside in Stage 4). Bringing them back is a 33% data
+   increase — more diverse geological structures, not just more
+   masks of the same ones. This is the next experiment to try if
+   we want to push further.
+
+2. **Architectural inductive bias.** SAGEConv with umbrella
+   Laplacian features may not be the optimal operator for this
+   problem. Alternatives (EdgeConv, GAT, cotangent Laplacian) have
+   different inductive biases that might fit the geological
+   surface domain better.
+
+3. **Information bottleneck in the rollout.** Each iteration
+   propagates information one ring outward. After N=80 iterations,
+   the signal from K must traverse 80 rings. The signal may decay
+   or get noisy along the way, regardless of model capacity.
+
+4. **Inherent ceiling of the dataset.** 30 surfaces with diverse
+   geological provenance is a small dataset for learning a
+   general-purpose extrapolation operator. We may have genuinely
+   reached the model's representational ceiling for this dataset.
+
+### Implications going forward
+
+- **Stop sweeping hyperparameters.** Width, depth, LR, augmentation,
+  regime weights, init method — all explored or considered. Further
+  exploration in this space is unlikely to yield meaningful gains.
+- **Architectural changes are the most promising remaining lever.**
+  But each is a significant code change with non-trivial risk.
+- **Final test evaluation is the natural next step**, with or
+  without one more architectural experiment.
+
+### Where the result lives
+
+- Checkpoint: `outputs/tensorboard/run_20260615_145241/best.pt`
+  (epoch 65, best val_rmse_meters=60.28).
+- Evaluation: `outputs/evaluation/run_20260615_145241_val.json`.
+
+### Caveats
+
+- **Single seed.** As always, n=1 seed comparisons are limited.
+- **Training was longer** (85 epochs vs 56 for Stage 11.8) due to
+  the model having more parameters to fit. This added compute cost
+  is real even though the model converged to a similar place.
+- **The "not capacity-limited" conclusion is specific to this
+  configuration.** A deeper model (n_layers=3) might still help —
+  it's a different axis (depth vs width).
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:
