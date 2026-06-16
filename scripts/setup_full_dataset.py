@@ -107,8 +107,7 @@ def verify(split_path, surfaces_dir):
         for sid in sorted(missing):
             print(f"  - {sid}")
         raise SystemExit(1)
-    print(f"
-All {len(all_sids)} surfaces have .npz files.")
+    print(f"All {len(all_sids)} surfaces have .npz files.")
 
 
 def main():
