@@ -95,8 +95,7 @@ Split sizes:")
         marker = "ok" if ok else "MISMATCH"
         print(f"  {k}: {actual} (expected {expected})  [{marker}]")
     if not all_ok:
-        print("
-WARNING: split sizes don't match expected.")
+        print("WARNING: split sizes don't match expected.")
     all_sids = set()
     for sids in split.values():
         all_sids.update(sids)
@@ -105,8 +104,7 @@ WARNING: split sizes don't match expected.")
         if not (surfaces_dir / f"{sid}.npz").is_file():
             missing.append(sid)
     if missing:
-        print(f"
-ERROR: .npz missing for {len(missing)} surfaces:")
+        print(f"ERROR: .npz missing for {len(missing)} surfaces:")
         for sid in sorted(missing):
             print(f"  - {sid}")
         raise SystemExit(1)
@@ -133,8 +131,8 @@ def main():
     print("Setup complete. Now run:")
     print("=" * 70)
     print()
-    print("  python scripts/train.py train.n_epochs=100 train.patience=20 \")
-    print("    optim.accum_steps=4 data.normalize_per_surface=true \")
+    print("  python scripts/train.py train.n_epochs=100 train.patience=20 ")
+    print("    optim.accum_steps=4 data.normalize_per_surface=true ")
     print("    data.init_method=meanplane data.n_masks_per_epoch=3 train.device=cuda")
     print()
 
