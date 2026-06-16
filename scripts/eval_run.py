@@ -41,24 +41,40 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("run_dir", type=Path)
     p.add_argument("--split", default="val")
-    p.add_argument("--n-masks", type=int, default=3)
+    p.add_argument("--n-masks", type=int, default=10)
     p.add_argument("--base-seed", type=int, default=1000)
     args = p.parse_args()
 
     ckpt_path = args.run_dir / "best.pt"
     print(f"Loading checkpoint from {ckpt_path}")
-    ckpt = load_checkpoint(ckpt_path)
+
+    # Read the run's config.yaml to detect architecture and data settings
+    # that were used at training time. This lets eval_run handle runs with
+    # non-default hidden_dim, n_layers, normalization, init_method, etc.
+    cfg = read_run_config(args.run_dir)
+    hidden_dim = int(cfg.get("model", {}).get("hidden_dim", 64))
+    n_layers = int(cfg.get("model", {}).get("n_layers", 2))
+    normalize_per_surface = (
+        cfg.get("data", {}).get("normalize_per_surface", False)
+    )
+    init_method = cfg.get("data", {}).get("init_method", "meanplane")
+
+    if hidden_dim != 64:
+        print(f"  detected hidden_dim={hidden_dim} from config.yaml")
+    if n_layers != 2:
+        print(f"  detected n_layers={n_layers} from config.yaml")
+
+    ckpt = load_checkpoint(
+        ckpt_path,
+        hidden_dim=hidden_dim,
+        n_message_passing=n_layers,
+    )
     print(f"  best_val_loss: {ckpt.best_val_loss:.2f} (epoch {ckpt.epoch})")
     print()
 
     # Run evaluation
     print(f"Evaluating on {args.split} split "
           f"({args.n_masks} masks per surface)...")
-    cfg = read_run_config(args.run_dir)
-    normalize_per_surface = (
-        cfg.get("data", {}).get("normalize_per_surface", False)
-    )
-    init_method = cfg.get("data", {}).get("init_method", "meanplane")
     if normalize_per_surface:
         print("  detected normalization=True from config.yaml")
     if init_method != "meanplane":
