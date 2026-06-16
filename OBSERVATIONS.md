@@ -1250,6 +1250,83 @@ Plausible explanations, in rough order of likelihood:
 
 ---
 
+## O13 — Deeper GNN (n_layers=3) hurts slightly: not depth-limited either
+
+**Observed in:** Stage 11.12 (full training run with `model.n_layers=3`,
+otherwise identical to Stage 11.8). Parameter count grew from 21k
+(2 layers) to 30k (3 layers).
+
+### Result: small but consistent regression
+
+| Regime | 11.8 (n_layers=2) | 11.12 (n_layers=3) | Δ |
+|---|---|---|---|
+| half_plane mean | 71.4 | 75.1 | +3.7 (worse) |
+| outward_free mean | 76.9 | 81.4 | +4.4 (worse) |
+| outward_pinned mean | 73.5 | 75.8 | +2.3 (worse) |
+| Overall mean | **73.7** | 77.3 | +3.6 (worse) |
+
+All regimes got slightly worse. The model trained normally
+(converged at epoch 33, early-stop at 53), but the resulting model
+generalizes slightly worse on val.
+
+### Likely explanation: over-smoothing
+
+Adding message-passing layers means each vertex aggregates
+information from increasingly distant neighbors per rollout
+iteration. With small graphs and 3 layers, this can cause
+**over-smoothing** — vertex features become too similar to each
+other, losing the local distinguishing information the model
+needs to predict precise z values.
+
+This is a known issue with deeper GNNs in the literature
+(Chen et al. 2020, "Measuring and relieving the over-smoothing
+problem"; Oono & Suzuki 2020, "Graph neural networks exponentially
+lose expressive power"). Our result is consistent with these
+findings.
+
+### What this tells us, combined with O12
+
+| Lever | Outcome |
+|---|---|
+| **Wider** (O12) | Tiny improvement (within noise) |
+| **Deeper** (O13) | Small regression |
+| **More augmentation** (O9) | No improvement past n=3 |
+| **Regime re-weighting** (O10) | Slight regression |
+| **Longer training, smaller LR** (O9) | No improvement |
+
+A pattern emerges: **none of the model-side adjustments move the
+needle.** Width, depth, regularization, training duration,
+learning rate, augmentation, regime emphasis — all tried. None
+produces a meaningful improvement.
+
+This consistently points to **data being the bottleneck, not the
+model.** We've fully explored the model side at this dataset
+size. The remaining lever is data: bringing back the V>50k
+surfaces (set aside in Stage 4) would add ~33% more training
+data with genuinely different geological structure.
+
+### Decision
+
+**Stage 11.8 remains the best model.** The current architecture
+(hidden_dim=64, n_layers=2) appears near-optimal for this
+problem at this dataset size. Future improvements need data, not
+model changes.
+
+### Where the result lives
+
+- Checkpoint: `outputs/tensorboard/run_20260616_072423/best.pt`
+  (epoch 33, best val_rmse_meters=65.41).
+- Evaluation: `outputs/evaluation/run_20260616_072423_val.json`.
+
+### Caveats
+
+- **Single seed**. As always.
+- **n_layers=4 not tested.** The depth-vs-quality tradeoff has a
+  curve; we tested {2, 3} and found 2 wins. 4 or more would likely
+  hurt more, but we haven't verified.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:
