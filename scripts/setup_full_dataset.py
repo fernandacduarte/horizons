@@ -85,8 +85,7 @@ def verify(split_path, surfaces_dir):
     print("=" * 70)
     with open(split_path) as f:
         split = json.load(f)
-    print("
-Split sizes:")
+    print("Split sizes:")
     all_ok = True
     for k, expected in EXPECTED_FINAL_SIZES.items():
         actual = len(split[k])
