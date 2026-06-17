@@ -1418,6 +1418,150 @@ this range.
 
 ---
 
+## O15 — Bringing back V>50k surfaces: memory constraints and partial result
+
+**Observed in:** Multiple experiments across two machines, attempting to
+include the 10 large (V>50k) surfaces excluded during Stage 4
+preprocessing. The motivation came from O12/O13/O14, which collectively
+suggested data diversity (not model capacity) might be the remaining
+bottleneck.
+
+### Memory constraints we encountered
+
+**On the macOS dev machine (16 GB RAM, CPU only):**
+- All 10 V>50k surfaces caused immediate OOM during training (process
+  killed by the OS).
+- Only the smallest (04BaseOligoMioceno, V=110,240) fit in memory.
+- Stage 11.13 documented the result with this one surface: essentially
+  flat improvement (~0.3m on overall mean).
+
+**On the GPU machine (NVIDIA RTX 6000 Ada, 48 GB VRAM, CUDA 13):**
+- With `accum_steps=4` (Stage 11.8 default), training OOM'd at step 0
+  even withhe 2 smallest surfaces dropped (610k, 443k still in train).
+- With `accum_steps=1`, training got to step ~20 before OOMing, with
+  the 412k surface still in train.
+- After removing 412k from train, training OOM'd again around step 21
+  — this time on a small surface, suggesting GPU memory fragmentation.
+- After also removing 230k from train, and setting
+  `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, training finally
+  ran to completion.
+
+**Root cause:** Our rollout loss keeps all intermediate states in the
+backward computation graph. For an N-step rollout on a V-vertex
+surface, peak memory scales roughly as O(V × N × hidden_dim). For the
+largest surfaces, V=610k and N≈130 push peak memory beyond 48 GB.
+
+This is **the same constraint that originally justified D4.2 (drop
+V>50k surfaces)** — we have empirically confirmed that decision was
+correct, and identified its true cause (trajectory-based backward graph
+memory), not just compute speed.
+
+### Final split for Stage 11.14 (GPU machine)
+
+After driven removals, the dataset used for Stage 11.14 was:
+
+| Split | Total | New V>50k included |
+|---|---|---|
+| train | 32 | 07TopoCenomaniano (165k), 16TopoAndarAlagoas (192k) |
+| val | 8 | 04BaseOligoMioceno (110k) |
+| test_id | 6 | 15TopoSal (195k) |
+| test_ood | 5 | none |
+
+Surfaces dropped from the original plan due to OOM:
+- 03TopoOligoMioceno (230k) — was in train
+- 06TopoCretaceoSuperior (412k) — was in train
+- 02TopoMioceno (443k) — was in train
+- 01FundoMar (455k) — was in val
+- 18TopoEmbasamento (610k) — was in train
+- 17TopoAndarJiquia (673k) — was in test_id
+
+### Stage 11.14 result (with the reduced V>50k addition)
+
+Trained with `accum_steps=1` (forced by GPU memory) on the new train
+set. Evaluated on the new 8-surface val with `--n-masks 10` (80
+records).
+
+For an apples-to-apples comparison, we also re-evaluated Stage 11.8's
+checkpoint on the same new 8-surface val:
+
+| Method | Overall | half_plane | outward_free | outward_pinned |
+|---|---|---|---|---|
+| Mean-plane | 90.4 | 99.8 | 95.2Harmonic | **73.1** | 94.3 | 77.9 | **28.3** |
+| GNN Stage 11.8 (orig val) | 76.6 | 92.2 | 73.2 | 53.6 |
+| GNN Stage 11.14 (+165k +192k in train) | 81.2 | 96.3 | 78.3 | 58.0 |
+
+### What we learn
+
+**Three findings, in order of confidence:**
+
+1. **Adding 2 mid-sized surfaces (165k, 192k) to training hurt the
+   model.** Every regime got worse by 4-5m versus Stage 11.8 on the
+   identical val set. Net: +4.6m overall mean RMSE. This is consistent
+   with O10 (regime re-weighting hurt) and O13 (deeper hurt). The
+   pattern: changes from Stage 11.8's "found" configuration consistently
+   regress.
+
+2. **The new val (with one 110k surface added) is intrinsically harder.**
+   Stage 11.8 went from 73.7m mean RMSE on the original 7-surface val
+   to 76.6m on the new 8-surface val. The 110k surface contributes
+   high-magnitude errors that drag the mean up. This is informative for
+   the writeup: smaller, simpler surfaces give optimistically-low
+   numbers; larger ones reveal the model's actual difficulty.
+
+3. **Harmonic infill now leads on overall mean.** On the new val,
+   harmonic infill achieves 73.1m vs our model's 76.6m (Stage 11.8).
+   This is partly because the new val surface (110k) is geologically
+   smooth and well-suited to harmonic interpolation. The qualitative
+   regime story is unchanged — GNN still wins on `outward_free` (73.2
+   vs 77.9) and is close on `half_plane`; harmonic still dominates
+   `outward_pinned` (28.3 vs 53.6).
+
+### Caveats on the Stage 11.14 result
+
+- **Forced `accum_steps=1` instead of Stage 11.8's `accum_steps=4`.**
+  Single-sample gradients are noisier. The training pattern was
+  consistent: best at epoch 15 of 35 (early stop at patience=20). We
+  haven't yet tested whether more epochs with `accum_steps=1` would
+  recover the lost performance.
+- **Two interpretations remain plausible:**
+    1. The noisier `accum_steps=1` updates need more epochs to converge.
+       Longer training (200 epochs, patience=40) might close the gap.
+    2. The added data genuinely makes the optimization ndscape harder
+       with our model size, and additional training won't recover.
+- **The Mac CPU run (with 128GB system RAM) is still in progress** and
+  will provide an independent data point. That experiment includes the
+  full set of 10 V>50k surfaces (or as many as fit during training).
+  Results pending.
+
+### Implications for the project
+
+If the longer-training experiment with `accum_steps=1` doesn't close
+the gap, **Stage 11.8 remains the best model** and the
+data-diversity hypothesis is effectively rejected at the scales we
+could test. Final test evaluation (Stage 12) would proceed with
+Stage 11.8 as the chosen model.
+
+### Where the results live
+
+- Stage 11.14 checkpoint:
+  `outputs/tensorboard/run_20260617_223754/best.pt` (epoch 15,
+  best val_rmse_meters=69.46).
+- Stage 11.14 evaluation:
+  `outputs/evaluation/run_20260617_223754_val.json`.
+- Stage 11.8 re-evaluation on new val:
+  `outputs/evaluation/run_20260614_155745_val.json` (overwrote previous
+  evaluation; the original 7-surface val results are gone unless
+  recovered from git).
+
+### Methodological note
+
+When changing the val set during a research project, both old and new
+models should be re-evaluated on the new set. Direct comparisons across
+runs require the same evaluation set. We did this correctly here —
+both Stage 11.8 and Stage 11.14 are scored on the same 80-record val.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:
