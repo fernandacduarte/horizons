@@ -57,15 +57,20 @@ def validate(
     sum_rmse_meters = 0.0
     per_surface: list[dict] = []
 
+    # Detect the model's device so we can move val tensors to match.
+    # This is important when training on CUDA: the dataset returns CPU
+    # tensors but the model expects them on the same device as its params.
+    device = next(model.parameters()).device
+
     for idx in range(n):
         item = dataset[idx]
-        z_true = item["z_true"]
-        z0 = item["z0"]
-        V_xy = item["V"][:, :2]
-        F = item["F"]
-        edge_index = item["edge_index"]
-        mask = item["mask"]
-        d = item["d"]
+        z_true = item["z_true"].to(device)
+        z0 = item["z0"].to(device)
+        V_xy = item["V"][:, :2].to(device)
+        F = item["F"].to(device)
+        edge_index = item["edge_index"].to(device)
+        mask = item["mask"].to(device)
+        d = item["d"].to(device)
         N = item["N"]
 
         result = rollout(
