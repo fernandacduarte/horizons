@@ -1327,6 +1327,97 @@ model changes.
 
 ---
 
+## O14 — Adding one large surface (110k V) to training: essentially flat
+
+**Observed in:** Stage 11.13 (full training run with one additional
+training surface: `04BaseOligoMioceno`, V=110,240, brought back from
+the V>50k exclusion list set during Stage 4). Otherwise identical to
+Stage 11.8: n=3 augmentation, lr=1e-3, normalize=true, init=meanplane,
+hidden_dim=64, n_layers=2.
+
+### Motivation recap
+
+After O12 (width didn't help) and O13 (depth hurt), we hypothesized the
+remaining bottleneck was data diversity, not model capacity. The
+original Stage 4 decision (D4.2) excluded V>50k surfaces as
+"computationally unwieldy." With our trajectory-based rollout loss,
+"computationally unwieldy" turned out to mean **OOM on 16GB RAM** when
+trying to fit the largest surfaces (610k+ vertices).
+
+We were able to fit one new surface (110k vertices) within our memory
+budget and tested whether even one extra surface moves the needle.
+
+### Result: essentially flat
+
+| Regime | 11.8 (30 train surfaces) | 11.13 (31 train surfaces) | Δ |
+|---|---|---|---|
+| half_plane mean | 71.4 | 70.9 | −0.5 (slightly better) |
+| outward_free mean | 76.9 | 77.6 | +0.7 (slightly worse) |
+| outward_pinned mean | 73.5 | 72.1 | −1.4 (slightly better) |
+| Overall mean | 73.7 | 73.4 | −0.3 (essentially same) |
+
+All differences are within the noise floor of the val set (7 surfaces,
+per-surface RMSE varies by 100m+). Adding one extra training surface
+did not produce a measurable improvement.
+
+### Note on val set composition
+
+The val set remained at 7 surfaces (no V>50k additions). 70 records
+total at --n-masks 10. Direct comparison with Stage 11.8's evaluation
+is apples-to-apples because the *test* set is identical; only the
+training data differs by one surface.
+
+### Two interpretations
+
+1. **One surface isn't enough.** The hypothesis "data diversity helps"
+   may need substantially more new data, not just one new surface.
+2. **More data won't help much regardless.** The training-vs-val gap
+   may reflect a fundamental ceiling related to model architecture
+   or task complexity, not data volume.
+
+The conclusive experiment is to add all 10 V>50k surfaces (full size
+range up to 673k vertices). This requires more RAM than our dev
+machine (16GB) provides. The experiment was set up to run on a
+separate Windows machine with 128GB RAM and i9-14900 CPU. **The
+Windows experiment is the deciding test of the data-diversity
+hypothesis** — to be documented as O15 when complete.
+
+### Training dynamics
+
+- Best epoch: 38 (well within budget).
+- Early-stop at epoch 58 (no val_rmse_meters improvement for 20).
+- Best val_rmse_meters: 64.98.
+- Train loss reached ~4 at end, still slowly descending.
+- The 110k surface appeared in step logs with N=69-80 rollout depth
+  — substantially larger than typical training surfaces (N=5-50).
+
+### Per-epoch cost
+
+~270s per epoch on the Mac CPU (~225s for Stage 11.8). The added
+surface increased per-epoch cost by only ~20% despite being 2.3× the
+size of our previous largest training surface (48k vertices). This
+suggests per-epoch cost is dominated by the **count** of (surface,
+mask) items, not the **size** of individual surfaces — at least in
+this range.
+
+### Where the result lives
+
+- Checkpoint: `outputs/tensorboard/run_20260616_164458/best.pt`
+  (epoch 38, best val_rmse_meters=64.98).
+- Evaluation: `outputs/evaluation/run_20260616_164458_val.json`.
+
+### Caveats
+
+- **Single seed.** As always.
+- **One surface is a small experiment.** The interpretation gap (1 vs
+  2 above) cannot be resolved with this data alone.
+- **Memory limit was the constraint, not science.** We would have
+  preferred to test the full V>50k set on this same hardware to
+  isolate the data-diversity question more cleanly, but OOM made that
+  infeasible.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:
