@@ -282,3 +282,28 @@ class TestValidation:
     def test_invalid_n_message_passing_rejected(self) -> None:
         with pytest.raises(ValueError, match="n_message_passing"):
             LocalOperator(n_message_passing=0)
+
+# ----------------------------------------------------------------------
+# Operator variants (conv_type)
+# ----------------------------------------------------------------------
+class TestConvType:
+    def test_edgeconv_forward_shape(self, anticline: HorizonSurface) -> None:
+        """EdgeConv variant builds and produces the same (n,) output."""
+        model = LocalOperator(conv_type="edgeconv", aggr="max")
+        inputs = _build_inputs(anticline)
+        dz = model(**inputs)
+        assert dz.shape == (anticline.n_vertices,)
+        assert dz.dtype == anticline.V.dtype
+
+    def test_edgeconv_gradients_flow(self, anticline: HorizonSurface) -> None:
+        """Gradients reach every EdgeConv parameter (needed for training)."""
+        model = LocalOperator(conv_type="edgeconv", aggr="max")
+        inputs = _build_inputs(anticline)
+        model(**inputs).sum().backward()
+        for p in model.parameters():
+            if p.requires_grad:
+                assert p.grad is not None and torch.isfinite(p.grad).all()
+
+    def test_unknown_conv_type_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown conv_type"):
+            LocalOperator(conv_type="gmm")

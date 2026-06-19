@@ -196,3 +196,53 @@ class TestValidation:
         setup_bad = {**setup, "N": 0}
         with pytest.raises(ValueError, match="N must be"):
             rollout(model, **setup_bad)
+
+# ----------------------------------------------------------------------
+# Checkpoint
+# ----------------------------------------------------------------------
+class TestCheckpoint:
+    def test_checkpoint_is_transparent(self):
+        """Gradient checkpointing must be mathematically transparent: identical
+        forward output AND identical parameter gradients vs the plain rollout.
+        Tested on EdgeConv (the memory-heavy operator that motivated it)."""
+        import torch
+        from pathlib import Path
+        from horizons.data.mesh import HorizonSurface
+        from horizons.data.masking import MaskSampler, MaskSamplerConfig
+        from horizons.data.init import init_z
+        from horizons.models.operator import LocalOperator
+        from horizons.training.rollout import rollout
+        from horizons.training.loss import rollout_loss
+
+        surface = HorizonSurface.from_npz(
+            Path(__file__).parent / "fixtures" / "anticline.npz"
+        )
+        sampler = MaskSampler(MaskSamplerConfig())
+        mask, d, _ = sampler.sample(surface, torch.Generator().manual_seed(0))
+        N = int(d.max().item())
+        z0 = init_z(surface.V, mask)
+        V_xy, F, edge_index = surface.V[:, :2], surface.F, surface.edge_index
+        z_true = surface.V[:, 2]
+
+        def run(use_ckpt: bool):
+            torch.manual_seed(0)
+            model = LocalOperator(conv_type="edgeconv", aggr="max")
+            res = rollout(
+                model, z0=z0, z_true=z_true, V_xy=V_xy, F=F,
+                edge_index=edge_index, mask=mask, d=d, N=N,
+                use_checkpoint=use_ckpt,
+            )
+            loss = rollout_loss(
+                z_trajectory=res.z_trajectory, dz_trajectory=res.dz_trajectory,
+                z_true=z_true, d=d, edge_index=edge_index, mask=mask,
+            )["total"]
+            loss.backward()
+            grads = torch.cat([p.grad.flatten() for p in model.parameters()])
+            return res.z_trajectory[-1].detach(), loss.detach(), grads
+
+        z_plain, loss_plain, g_plain = run(False)
+        z_ckpt, loss_ckpt, g_ckpt = run(True)
+
+        assert torch.allclose(z_plain, z_ckpt, atol=1e-6)
+        assert torch.allclose(loss_plain, loss_ckpt, atol=1e-6)
+        assert torch.allclose(g_plain, g_ckpt, atol=1e-5)

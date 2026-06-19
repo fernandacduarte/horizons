@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import torch
+from torch.utils.checkpoint import checkpoint as grad_checkpoint
 
 
 class LocalOperator(Protocol):
@@ -68,6 +69,7 @@ def rollout(
     mask: torch.Tensor,           # (n,) bool, True=known
     d: torch.Tensor,              # (n,) int64
     N: int,
+    use_checkpoint: bool = False,
 ) -> RolloutResult:
     """Run the iterative rollout for N steps.
 
@@ -95,8 +97,20 @@ def rollout(
 
     z_t = z0
     for _ in range(N):
-        # Predict the residual
-        dz_t = model(z_t, V_xy, edge_index, F, mask, d)
+        # Predict the residual. With use_checkpoint, gradient-checkpoint the
+        # operator forward: its (per-edge) activations are recomputed during
+        # backward instead of retained, turning peak memory from O(N) to O(1)
+        # in the rollout depth. Needed for memory-heavy operators (EdgeConv)
+        # and large surfaces. use_reentrant=False so gradients still reach the
+        # model parameters even at step 0, where z_t (the only tensor input)
+        # does not yet require grad.
+        if use_checkpoint:
+            dz_t = grad_checkpoint(
+                model, z_t, V_xy, edge_index, F, mask, d,
+                use_reentrant=False,
+            )
+        else:
+            dz_t = model(z_t, V_xy, edge_index, F, mask, d)
 
         # Apply correction
         z_t_unanchored = z_t + dz_t

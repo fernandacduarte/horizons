@@ -9,7 +9,7 @@ where (n_x, n_y, n_z) are the recomputed vertex normals from V_xy and z^t,
 and kappa is the umbrella Laplacian of z^t. Both are recomputed at every
 rollout iteration to capture the evolving geometry.
 
-Pipeline:
+Default pipeline:
     input MLP (9 -> H)
     SAGEConv (H -> H, mean aggr)
     ReLU
@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
-from torch_geometric.nn import SAGEConv
+from torch_geometric.nn import SAGEConv, EdgeConv
 
 from horizons.data.features import (
     compute_vertex_normals,
@@ -35,18 +35,26 @@ from horizons.data.features import (
 class LocalOperator(nn.Module):
     """Real per-iteration operator F_Theta.
 
-    Parameters
+        Parameters
     ----------
     hidden_dim : int
-        Hidden dimension H for the input projection and SAGE layers.
+        Hidden dimension H for the input projection and message-passing layers.
     n_message_passing : int
-        Number of SAGEConv layers. Default 2 (the receptive field per
+        Number of message-passing layers. Default 2 (the receptive field per
         rollout iteration is then 2 hops; iterating N times gives
         2*N effective hops).
     output_init_scale : float
         Std of the normal initialization for the final linear layer's
         weight. Smaller means smaller initial Δz, which is more stable
         for the rollout.
+    conv_type : str
+        Which message-passing operator to use: "sage" (SAGEConv, default) 
+        or "edgeconv" (EdgeConv / DGCNN,
+        whose edge messages use the neighbour difference h_j - h_i).
+    aggr : str
+        Neighbour aggregation for each layer ("mean", "max", ...), passed
+        straight to the underlying conv. SAGE uses "mean"; EdgeConv is
+        canonically "max".
     """
 
     N_INPUT_FEATURES = 9  # (x, y, z, n_x, n_y, n_z, kappa, mask, d)
@@ -56,6 +64,8 @@ class LocalOperator(nn.Module):
         hidden_dim: int = 64,
         n_message_passing: int = 2,
         output_init_scale: float = 0.01,
+        conv_type: str = "sage",
+        aggr: str = "mean",
     ) -> None:
         super().__init__()
         if n_message_passing < 1:
@@ -63,12 +73,15 @@ class LocalOperator(nn.Module):
                 f"n_message_passing must be >= 1; got {n_message_passing}"
             )
 
+        self.conv_type = conv_type
+        self.aggr = aggr
+
         # Input projection: 9 features -> hidden_dim
         self.input_proj = nn.Linear(self.N_INPUT_FEATURES, hidden_dim)
 
-        # Message-passing stack
+        # Message-passing stack (operator chosen by conv_type)
         self.convs = nn.ModuleList([
-            SAGEConv(hidden_dim, hidden_dim, aggr="mean")
+            self._make_conv(conv_type, hidden_dim, aggr)
             for _ in range(n_message_passing)
         ])
 
@@ -83,6 +96,29 @@ class LocalOperator(nn.Module):
         final_linear = self.head[-1]
         nn.init.normal_(final_linear.weight, std=output_init_scale)
         nn.init.zeros_(final_linear.bias)
+
+    @staticmethod
+    def _make_conv(conv_type: str, hidden_dim: int, aggr: str) -> nn.Module:
+        """Build one message-passing layer of the requested type.
+
+        - "sage": SAGEConv — keeps a self-term W1·h_i plus aggregated
+          neighbour features. Default;
+        - "edgeconv": EdgeConv (DGCNN) — each edge message is
+          h_Θ([h_i, h_j - h_i]); the explicit neighbour *difference*
+          gives a local-gradient inductive bias (the reason we're trying it).
+        """
+        if conv_type == "sage":
+            return SAGEConv(hidden_dim, hidden_dim, aggr=aggr)
+        if conv_type == "edgeconv":
+            mlp = nn.Sequential(
+                nn.Linear(2 * hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+            )
+            return EdgeConv(mlp, aggr=aggr)
+        raise ValueError(
+            f"Unknown conv_type {conv_type!r}; expected 'sage' or 'edgeconv'"
+        )
 
     def forward(
         self,

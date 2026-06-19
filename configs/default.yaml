@@ -99,6 +99,7 @@ train:
   log_every_steps: 10                # print a status line every N optimizer steps
   device: cpu                        # cpu | mps | cuda (training device)
   best_metric: val_rmse_meters       # val_loss | val_rmse_meters
+  grad_checkpoint: false             # recompute operator forward in backward; rollout memory O(N)->O(1)
 
   log_dir: outputs/tensorboard
   ckpt_dir: outputs/checkpoints

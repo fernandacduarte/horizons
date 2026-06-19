@@ -53,6 +53,8 @@ def main(cfg: DictConfig) -> None:
             hidden_dim=cfg.model.hidden_dim,
             n_message_passing=cfg.model.n_layers,
             output_init_scale=cfg.model.output_init_scale,
+            conv_type=cfg.model.type,
+            aggr=cfg.model.aggr,
         )
     elif model_kind == "placeholder":
         model = TinySAGE(hidden_dim=32, output_init_scale=0.01)
@@ -60,7 +62,7 @@ def main(cfg: DictConfig) -> None:
         raise ValueError(f"Unknown model_kind: {model_kind!r}")
 
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"Model: {model_kind} | params: {n_params:,}\n")
+    print(f"Model: {model_kind} ({cfg.model.type}, aggr={cfg.model.aggr}) | params: {n_params:,}\n")
 
     # Set up TensorBoard run directory
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -99,6 +101,7 @@ def main(cfg: DictConfig) -> None:
             checkpoint_path=str(checkpoint_path),
             accum_steps=cfg.optim.accum_steps,
             best_metric=cfg.train.best_metric,
+            use_checkpoint=cfg.train.grad_checkpoint,
         )
     finally:
         writer.close()

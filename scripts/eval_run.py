@@ -58,6 +58,8 @@ def main() -> None:
         cfg.get("data", {}).get("normalize_per_surface", False)
     )
     init_method = cfg.get("data", {}).get("init_method", "meanplane")
+    conv_type = cfg.get("model", {}).get("type", "sage")
+    aggr = cfg.get("model", {}).get("aggr", "mean")
 
     if hidden_dim != 64:
         print(f"  detected hidden_dim={hidden_dim} from config.yaml")
@@ -68,6 +70,8 @@ def main() -> None:
         ckpt_path,
         hidden_dim=hidden_dim,
         n_message_passing=n_layers,
+        conv_type=conv_type,
+        aggr=aggr,
     )
     print(f"  best_val_loss: {ckpt.best_val_loss:.2f} (epoch {ckpt.epoch})")
     print()
@@ -79,7 +83,10 @@ def main() -> None:
         print("  detected normalization=True from config.yaml")
     if init_method != "meanplane":
         print(f"  detected init_method={init_method!r} from config.yaml")
+    if conv_type != "sage":
+        print(f"  detected conv_type={conv_type!r} (aggr={aggr}) from config.yaml")
     print()
+
 
     result = evaluate_split(
         ckpt.model, args.split,
