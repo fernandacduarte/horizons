@@ -26,9 +26,13 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--surfaces-dir", default="data/surfaces")
     ap.add_argument("--split-file", default="data/splits/split_v1.json")
-    ap.add_argument("--threshold", type=int, default=50_000)
+    ap.add_argument("--threshold", type=int, default=50_000,
+                    help="lower bound: only consider surfaces larger than this")
+    ap.add_argument("--max-vertices", type=int, default=None,
+                    help="upper bound: skip surfaces larger than this (e.g. 600000)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+    upper = args.max_vertices if args.max_vertices is not None else float("inf")
 
     split = json.load(open(args.split_file))
     held_out = set(split["val"]) | set(split["test_id"]) | set(split["test_ood"])
@@ -42,10 +46,11 @@ def main() -> None:
             V = np.load(p)["V"].shape[0]
         except Exception:
             continue
-        if V > args.threshold and sid not in held_out and sid not in train:
+        if args.threshold < V <= upper and sid not in held_out and sid not in train:
             added.append((V, sid))
 
-    print(f"large surfaces (V > {args.threshold:,}) to add to train: {len(added)}")
+    cap = f", V <= {args.max_vertices:,}" if args.max_vertices is not None else ""
+    print(f"large surfaces (V > {args.threshold:,}{cap}) to add to train: {len(added)}")
     for V, sid in sorted(added, reverse=True):
         print(f"  + {V:>8,}  {sid}")
     if not added:
