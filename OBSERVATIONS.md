@@ -1562,6 +1562,214 @@ both Stage 11.8 and Stage 11.14 are scored on the same 80-record val.
 
 ---
 
+## O16 — Noise-floor calibration: overall-mean differences below ~4 m are not real
+
+**Observed in:** A dedicated calibration run before the EdgeConv experiment
+(Stage 12). We re-scored the fixed Stage 11.8 checkpoint
+(run_20260614_155745) on the 7-surface val under 5 different mask-draw
+seeds (base_seed 1000–5000), n_masks=10, via `scripts/noise_band.py`. The
+model is held constant; only the random masks change, isolating the
+*eval-mask* component of run-to-run variance.
+
+### Result
+
+| Quantity | min–max | mean | range |
+|---|---|---|---|
+| model overall | 69.8 – 73.7 | 72.1 | **3.9 m** |
+| harmonic overall | 70.6 – 77.7 | 74.0 | 7.1 m |
+| model half_plane | 68.9 – 112.8 | 82.8 | **43.9 m** |
+| model outward_free | 55.1 – 76.9 | 66.8 | 21.8 m |
+| model outward_pinned | 50.3 – 87.5 | 69.5 | **37.2 m** |
+
+### Two findings that reshape how we read every result
+
+1. **On overall mean, the GNN and harmonic infill are tied within noise.**
+   Model 72.1 vs harmonic 74.0 — a ~1.9 m gap, smaller than the 3.9 m
+   eval-mask range. Earlier headline framings ("73.7 vs harmonic", the
+   continuation brief's "76.6 vs 73.1") are both inside the noise; neither
+   method is actually ahead on the aggregate. The honest claim is a tie on
+   overall mean, with the real story in the regime breakdown.
+
+2. **Per-regime single-seed numbers are unreliable.** half_plane swings
+   44 m, outward_pinned 37 m, outward_free 22 m — purely from which masks
+   were drawn, model fixed. A single-eval statement like "outward_pinned
+   53.6 vs harmonic 28.3" can be off by ±20 m. Per-regime claims require
+   averaging over several eval seeds with the spread reported.
+
+### Why the per-regime spread is so large
+
+The val set has only 7 surfaces; at n=10 masks each regime gets ~20–28
+records, but they are dominated by a few hard surfaces (e.g.
+05_TopoCretaceo). A handful of lucky/unlucky mask draws on those surfaces
+moves the regime mean by tens of metres. This is a dataset limitation (O11
+already flagged the small-val problem), not fixable by sampling more masks.
+
+### Implications
+
+- **Working decision threshold:** treat an overall-mean change below ~4 m as
+  noise. Training-seed variance (re-running with a different seed) adds to
+  this; we measured only the eval-mask half — the cheaper and dominant
+  component — and deferred the ~2 retrains needed for the training half.
+- For the EdgeConv comparison (O18), the test is whether its overall mean
+  lands outside Stage 11.8's 69.8–73.7 m band, not whether it "beats 72.1."
+- The thesis should report aggregate metrics as ranges over eval seeds, not
+  single numbers, and frame model-vs-harmonic on overall mean as a tie.
+
+### Where the result lives
+
+- `scripts/noise_band.py outputs/tensorboard/run_20260614_155745`
+  (5 seeds, n_masks=10).
+
+### Caveats
+
+- **Eval-mask variance only.** Training-seed variance (init + shuffle order)
+  is not included and would widen the band further.
+- **One checkpoint.** The spread is for the Stage 11.8 model; the
+  dataset-driven per-regime instability would persist for any model.
+
+---
+
+## O17 — EdgeConv's per-edge memory makes the full-BPTT rollout OOM at 48k vertices
+
+**Observed in:** First EdgeConv training attempt (Stage 12, D12.1), seed 42,
+otherwise Stage 11.8 config, on the 16 GB macOS dev machine. The process was
+OOM-killed (no Python traceback) in epoch 0, on reaching the first
+48k-vertex surface.
+
+### What happened
+
+EdgeConv (PyG) materialises a feature vector *per edge*:
+`hΘ([h_i, h_j − h_i])` produces tensors of shape `[E, 2H]` then `[E, H]`,
+all retained for backward. A triangle mesh has E ≈ 6V directed edges, and
+the rollout keeps the full N-step graph for BPTT (D5.6). So EdgeConv's peak
+training memory is roughly `2 layers × N × E × 4H × 4 bytes`.
+
+For a 48k-vertex surface (E ≈ 288k, H = 64):
+
+| Operator | retained per layer per step | peak at N≈30 / N≈50 (2 layers) |
+|---|---|---|
+| SAGE (per-vertex scatter) | ~12 MB | ~0.7 / 1.2 GB |
+| EdgeConv (per-edge MLP) | ~295 MB | ~18 / 30 GB |
+
+EdgeConv's per-step footprint is ~24× SAGE's (≈6× the edges × ≈4× the
+width), so it blows past 16 GB the moment training touches one of the four
+48k-vertex train surfaces — and would strain even the 48 GB GPU on the
+deepest masks.
+
+### Interpretation
+
+This is the same O(V × N × H) trajectory-retention wall from O15, but
+EdgeConv's per-edge cost makes it bite at 48k vertices instead of 200k+.
+More generally: **expressive per-edge operators (EdgeConv, and likely
+GAT/GINE) are incompatible with full-trajectory BPTT at our surface sizes
+without memory engineering.** The cheap scatter operators (SAGE, GCN) are
+the exception, not the rule.
+
+### Resolution
+
+Gradient checkpointing the per-step operator call (D12.2) recomputes the
+per-edge activations during backward instead of retaining them, dropping
+peak from ~30 GB to under 1 GB for the 48k surface. With it enabled,
+EdgeConv trains to completion on the 16 GB machine (~710 s/epoch, ~3×
+SAGE's ~225 s, from the per-edge MLP plus the recompute). The checkpointing
+is mathematically transparent (D12.2 test), so the result remains a fair
+comparison to the non-checkpointed SAGE baseline.
+
+### Implications
+
+- Any future expressive-operator ablation must budget for checkpointing.
+- The same machinery unblocks the V>50k surfaces for the data-diversity
+  question (O14/O15), now trainable within 16 GB regardless of depth.
+
+### Where it lives
+
+- Memory scaling: the EdgeConv-vs-SAGE retained-tensor estimate above.
+- Resolution: `horizons/training/rollout.py` (`use_checkpoint`), D12.2.
+
+---
+
+## O18 — EdgeConv (max) does not beat SAGE: the operator is not the lever
+
+**Observed in:** Stage 12 (D12.1). EdgeConv with max aggregation, seed 42,
+otherwise the exact Stage 11.8 config (30-surface train, normalize,
+meanplane, n_masks=3, hidden=64, layers=2), trained on the GPU container
+with gradient checkpointing (D12.2; verified the container used the 30-train
+/ 7-val split). Evaluated with the same paired protocol as the O16 noise
+probe: 5 mask-draw seeds (1000–5000), n_masks=10, identical masks to the
+Stage 11.8 evaluation.
+
+### Result: consistently ~2.3 m worse, within the noise envelope
+
+Paired by mask-draw seed (same masks → controls for eval-mask variance):
+
+| mask seed | SAGE 11.8 | EdgeConv | Δ (EC − SAGE) |
+|---|---|---|---|
+| 1000 | 73.69 | 76.41 | +2.72 |
+| 2000 | 72.54 | 75.41 | +2.87 |
+| 3000 | 71.07 | 73.78 | +2.71 |
+| 4000 | 73.36 | 74.83 | +1.47 |
+| 5000 | 69.78 | 71.75 | +1.97 |
+| **mean** | **72.09** | **74.44** | **+2.35** |
+
+EdgeConv is worse on all 5 paired draws (mean +2.35 m, std of the paired
+difference 0.6 m). Controlling for masks, the regression is *consistent*,
+but its magnitude (2.35 m) is within the ~4 m eval-mask noise floor (O16) —
+and training-seed variance (unmeasured) would only widen that. Honest read:
+**no improvement, plausibly a small regression, not confidently separable
+from the training lottery.**
+
+### The hypothesised win did not appear
+
+Per-regime means (5 seeds):
+
+| regime | SAGE 11.8 | EdgeConv | Δ |
+|---|---|---|---|
+| half_plane | 82.8 | 85.7 | +2.9 |
+| outward_free | 66.8 | 70.5 | +3.7 |
+| outward_pinned | 69.5 | 69.9 | +0.4 |
+
+D12.1's hypothesis was that EdgeConv's neighbour-difference (local-gradient)
+inductive bias would help the **extrapolation** regimes (half_plane,
+outward_free). It did the opposite — nominally worse on exactly those (within
+noise), tied on outward_pinned. There is no hint of the predicted gain.
+
+### Interpretation
+
+Given a fair fight — identical data and config, memory unblocked by
+checkpointing — a genuinely different, more expressive operator lands on top
+of SAGE (slightly under). Combined with the Stage 11 sweep (width O12, depth
+O13, augmentation O9, regime weights O10, λ_c, LR, data O14/O15), this is
+strong evidence that **the bottleneck is not the message-passing operator.**
+The plateau at ~72 m (± noise) is set by something else — most plausibly the
+rollout's long-range information propagation (signal from K must cross up to
+~50–130 rings) or the small, hard dataset — not the choice of GNN layer.
+
+### Decision
+
+EdgeConv (max) is rejected as an improvement; **Stage 11.8 (SAGE) remains the
+best model.** The operator axis is considered explored. aggr=mean is the one
+untested EdgeConv variant, but being the more SAGE-like aggregation it is
+expected to regress toward SAGE, so it is deprioritised.
+
+### Where the result lives
+
+- EdgeConv checkpoint: `outputs/tensorboard/run_20260619_155040/best.pt`
+  (aggr=max, best epoch 41).
+- Paired eval: `scripts/noise_band.py` on that run dir and on
+  run_20260614_155745 (Stage 11.8), seeds 1000–5000.
+
+### Caveats
+
+- **One training seed each.** The +2.35 m is single-seed-vs-single-seed
+  across eval masks; training-seed variance is unmeasured, so the small
+  regression cannot be cleanly separated from the training lottery. Safe
+  claim: "no improvement."
+- **aggr=mean untested.**
+- **Checkpointing is transparent (D12.2 test),** so it does not confound the
+  comparison.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:

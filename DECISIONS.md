@@ -1176,7 +1176,11 @@ features better.
 
 **Risk:** Significant refactoring; impact unclear.
 
-**Results:** _(to be filled in)_
+**Results:** Implemented in Stage 12 (D12.1). EdgeConv (aggr=max) added as a
+`conv_type` option on `LocalOperator`; it required gradient checkpointing
+(D12.2) to fit in memory (O17 — EdgeConv OOM'd at 48k vertices). Accuracy
+vs the Stage 11.8 baseline and the O16 noise floor: O18 (pending the running
+experiment). GAT not yet tried.
 
 ### Candidate 8 (Tier 3): Cotangent Laplacian
 
@@ -1330,6 +1334,94 @@ afterward."
 
 **Status:** In effect from Stage 11.7 onward. All subsequent runs
 use val_rmse_meters as the criterion.
+
+---
+
+## Stage 12 — Alternative operators and memory engineering
+
+This stage begins the architecture ablations deferred from Stage 11 (see
+Candidates 7/8 and the "Future / open decisions" list). The first two
+entries add an alternative message-passing operator (EdgeConv) and the
+gradient-checkpointing machinery needed to train it.
+
+### D12.1 — Operator selector: `conv_type` ("sage" | "edgeconv")
+
+**Decision:** `LocalOperator` now takes `conv_type` (default "sage") and
+`aggr` (default "mean") and builds its message-passing stack through a
+`_make_conv(conv_type, hidden_dim, aggr)` helper. "sage" returns the
+existing `SAGEConv(H, H, aggr)`; "edgeconv" returns
+`EdgeConv(MLP(2H→H→H), aggr)`. `forward()` is unchanged — both layers share
+the `conv(h, edge_index)` signature. Wired through `cfg.model.type` /
+`cfg.model.aggr` (previously a dead config stub) in `scripts/train.py`, and
+through `load_checkpoint(..., conv_type, aggr)` so eval rebuilds the right
+architecture from the saved `config.yaml`.
+
+**Where:** `horizons/models/operator.py` (`_make_conv`), `scripts/train.py`,
+`horizons/eval/checkpoint.py`, `scripts/eval_run.py`, `scripts/noise_band.py`.
+Test: `tests/test_operator.py::TestConvType`.
+
+**Why EdgeConv:** every Stage 11 lever (width O12, depth O13, augmentation
+O9, regime weights O10, λ_c Stage 11.1, LR, more data O14/O15) moved val
+RMSE by less than the noise floor — but all were "more SAGE." SAGE's update
+`W1·h_i + W2·mean(h_j)` is an *averaging* operator; a weighted mean of
+neighbours cannot extend a trend, only smooth it. EdgeConv's edge message
+`hΘ([h_i, h_j − h_i])` carries the explicit neighbour *difference*
+`h_j − h_i` — a local-gradient inductive bias, which is what extending a
+geological dip outward needs. It is the one genuinely different axis on the
+model side. `hΘ` is an MLP (not a single linear) because a linear edge
+function collapses EdgeConv back to an affine aggregator; the
+ReLU-separated MLP is the DGCNN (Wang et al. 2019) form and keeps params
+comparable (29.7k vs SAGE's 21.4k).
+
+**aggr="max" for the first run:** canonical EdgeConv uses max
+(salient-difference selection), the genuinely different operator.
+`aggr="mean"` (smoother local-gradient flavour, one variable from SAGE) is
+the queued follow-up if max is borderline.
+
+**Status:** Implemented. First experiment (EdgeConv, aggr=max, seed=42,
+otherwise Stage 11.8 config) running; accuracy result to be recorded in
+O18. "gmm" is accepted in the config vocabulary but not implemented (raises
+ValueError).
+
+### D12.2 — Gradient checkpointing in the rollout
+
+**Decision:** `rollout()` takes `use_checkpoint: bool = False`. When true,
+each per-step `model(...)` call is wrapped in
+`torch.utils.checkpoint.checkpoint(..., use_reentrant=False)`, so the
+operator's activations are recomputed during backward instead of retained.
+Threaded through `train()` (`loop.py`) and `cfg.train.grad_checkpoint`
+(`train.py`, default false). Eval is unaffected — it runs under
+`@torch.no_grad`, so no graph is retained.
+
+**Where:** `horizons/training/rollout.py`, `horizons/training/loop.py`,
+`scripts/train.py`, `configs/default.yaml` (`train.grad_checkpoint`).
+Test: `tests/test_rollout.py::TestCheckpoint::test_checkpoint_is_transparent`.
+
+**Why:** the trajectory-based rollout retains the full N-step graph for BPTT
+(D5.6), so peak training memory is O(V × N × H) — the wall documented in
+O15. EdgeConv makes it far worse: it materialises a feature vector *per
+edge* (~6× the vertices, ~4× the width), so its peak is ~24× SAGE's and it
+OOM'd at just 48k vertices on 16 GB (O17). Checkpointing drops retention
+from O(N) to O(1) in the rollout depth — EdgeConv's peak on a 48k surface
+falls from ~30 GB to under 1 GB — at the cost of one extra forward in
+backward (~1.5–2× compute). It is mathematically transparent (the test
+asserts identical output, loss, and parameter gradients vs the plain
+rollout), so a checkpointed run is a fair comparison to a non-checkpointed
+one.
+
+**`use_reentrant=False` specifically:** the reentrant variant drops
+parameter gradients when no *input* tensor requires grad — exactly our
+step-0 case (z⁰ is detached init; only the weights need grad). The
+non-reentrant variant tracks the params correctly.
+
+**Bonus — reopens the large-surface question:** the O15 data-diversity
+experiments were blocked by the same O(V × N × H) wall. With checkpointing,
+the V>50k surfaces become trainable within 16 GB (CPU) regardless of depth,
+so the data-diversity hypothesis can be revisited cleanly (deferred).
+
+**Status:** Implemented and tested. Default off (SAGE runs pay no recompute
+cost); enabled for EdgeConv and any future memory-heavy operator or
+large-surface run.
 
 ---
 
