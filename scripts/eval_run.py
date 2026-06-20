@@ -58,6 +58,7 @@ def main() -> None:
         cfg.get("data", {}).get("normalize_per_surface", False)
     )
     init_method = cfg.get("data", {}).get("init_method", "meanplane")
+    split_file = cfg.get("data", {}).get("split_file", "data/splits/split_v1.json")
     conv_type = cfg.get("model", {}).get("type", "sage")
     aggr = cfg.get("model", {}).get("aggr", "mean")
 
@@ -94,6 +95,7 @@ def main() -> None:
         base_seed=args.base_seed,
         normalize_per_surface=normalize_per_surface,
         init_method=init_method,
+        split_file=split_file,
     )
 
     # Save JSON

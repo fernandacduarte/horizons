@@ -1423,6 +1423,38 @@ so the data-diversity hypothesis can be revisited cleanly (deferred).
 cost); enabled for EdgeConv and any future memory-heavy operator or
 large-surface run.
 
+### D12.3 — Phase-2 split: large surfaces, magnitude-balanced
+
+**Decision:** A new canonical split (`data/splits/split_v1.json`) for Phase 2
+that adds the eight V>50k, V≤600k surfaces (110k–455k) to the Stage-4 small
+split, placed by hand to balance mesh magnitude across sets:
+- **train (+4):** 15TopoSal (195k), 16TopoAndarAlagoas (192k),
+  03TopoOligoMioceno (230k), 01FundoMar (455k)
+- **val (+2):** 04BaseOligoMioceno (110k), 02TopoMioceno (443k)
+- **test_id (+2):** 07TopoCenomaniano (165k), 06TopoCretaceoSuperior (412k)
+
+Each set gets one ~400k+ surface plus moderate-large ones, so train / val /
+test_id all span the size range. The two >600k giants (610k, 673k) are
+excluded for tractable epoch time. Result: train 34, val 9, test_id 7,
+test_ood 5 (R7, unchanged).
+
+**Where:** generated reproducibly by `scripts/build_phase2_split.py` (explicit,
+non-seeded placement); the resulting `split_v1.json` is committed — unlike
+O15's split, which lived only on the container and was lost.
+
+**Why hand-balanced rather than stratified:** with only 8 large surfaces a
+random/stratified draw can clump the big ones into one set; explicit balance
+guarantees each set tests a very-large surface, needed for a faithful
+generalization claim across scales.
+
+**Trade-off accepted:** the 443k surface in val dominates the val aggregate and
+widens its run-to-run band, lowering tuning sensitivity (cf. O16). Mitigated by
+always reporting the per-surface decomposition.
+
+**Status:** Phase-2 canonical split. Phase-1 results were on the prior
+7-surface val and are not directly comparable; each phase is baselined on its
+own val.
+
 ---
 
 ## Future / open decisions

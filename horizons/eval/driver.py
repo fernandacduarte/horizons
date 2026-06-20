@@ -61,6 +61,7 @@ def evaluate_split(
     device: str | torch.device = "cpu",
     normalize_per_surface: bool = False,
     init_method: str = "meanplane",
+    split_file: str | Path = "data/splits/split_v1.json",
 ) -> EvalResult:
     """Evaluate model + baselines on every surface in a split, with
     multiple mask samples per surface.
@@ -78,7 +79,7 @@ def evaluate_split(
         mask_config = MaskSamplerConfig()
     sampler = MaskSampler(mask_config)
 
-    surfaces = load_split(split_name)
+    surfaces = load_split(split_name, split_file=split_file)
     result = EvalResult(
         split_name=split_name,
         n_surfaces=len(surfaces),

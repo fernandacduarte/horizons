@@ -12,11 +12,11 @@ seed: 42
 # Data
 # --------------------------------------------------------
 data:
-  surfaces_dir: data/surfaces        # processed mesh files live here
-  split_file: data/splits/split_v1.json
-  normalize_per_surface: true        # Stage 11.6 / Candidate 9: closed the outward_pinned gap (O6)
-  init_method: meanplane             # Stage 11.5 / Candidate 2: 'meanplane' or 'harmonic'
-  n_masks_per_epoch: 3               # Stage 11.8 / Candidate 3: triple augmentation is the new default (O8)
+  surfaces_dir: data/surfaces             # processed mesh files live here
+  split_file: data/splits/split_v2.json   # Phase-2 split; Phase 1 preserved in split_v1
+  normalize_per_surface: true             # Stage 11.6 / Candidate 9: closed the outward_pinned gap (O6)
+  init_method: meanplane                  # Stage 11.5 / Candidate 2: 'meanplane' or 'harmonic'
+  n_masks_per_epoch: 3                    # Stage 11.8 / Candidate 3: triple augmentation is the new default (O8)
 
 # --------------------------------------------------------
 # Mask sampler (Stage 2)

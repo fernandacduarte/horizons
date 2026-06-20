@@ -1770,6 +1770,37 @@ expected to regress toward SAGE, so it is deprioritised.
 
 ---
 
+## Phase 1 concluded; Phase 2 (full dataset) begins
+
+**Phase 1 (small-data regime, V ≤ 48k, 30 train surfaces).** Across O1–O18 we
+ran an exhaustive search — coordinate normalization (O6), init (O7),
+augmentation (O8/O9), regime weights (O10), width (O12), depth (O13), λ_c
+(Stage 11.1), more data within memory limits (O14/O15), and a genuinely
+different operator (EdgeConv, O18). **Stage 11.8 (SAGE, hidden=64, 2 layers,
+normalize, meanplane, n_masks=3, 30/40/30) is the best model**, at ~72 m on the
+7-surface val and tied with harmonic infill within the ~4 m noise floor (O16).
+No model-side lever beats it; the bottleneck is the rollout dynamics or the
+small dataset, not capacity or operator choice. **This concludes Phase 1.**
+
+**Phase 2 (full dataset).** Gradient checkpointing (D12.2) removed the memory
+wall (O17) that forced the V>50k surfaces out at Stage 4 (D4.2). Phase 2
+restarts the study on a new canonical split (D12.3) that adds the eight V≤600k
+large surfaces (110k–455k), magnitude-balanced across train / val / test_id so
+the model is tested faithfully across mesh scales. Plan:
+1. **Fresh baseline (O19):** Stage 11.8 hyperparameters on the new split, with
+   n_epochs=200 / patience=40 (more and larger data may need longer to
+   converge) and grad_checkpoint=true.
+2. **Hypothesis-driven tuning.** Priority: re-test **capacity** (width/depth) —
+   O12's "not capacity-limited" was specific to the small-data regime, and more
+   data may flip it — then init and operator. Deprioritise levers with no
+   reason to interact with data scale (regime weights, λ_c).
+
+Phase-1 numbers (7-surface val, ~72 m floor) and Phase-2 numbers (9-surface val
+incl. large surfaces) are NOT directly comparable; each phase is baselined on
+its own val.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:

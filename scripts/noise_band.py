@@ -44,6 +44,7 @@ def main() -> None:
     init_method = cfg.get("data", {}).get("init_method", "meanplane")
     conv_type = cfg.get("model", {}).get("type", "sage")
     aggr = cfg.get("model", {}).get("aggr", "mean")
+    split_file = cfg.get("data", {}).get("split_file", "data/splits/split_v1.json")
 
     ckpt = load_checkpoint(
         args.run_dir / "best.pt",
@@ -63,6 +64,7 @@ def main() -> None:
             ckpt.model, args.split,
             n_masks_per_surface=args.n_masks, base_seed=seed,
             normalize_per_surface=normalize, init_method=init_method,
+            split_file=split_file,
         )
         overall = aggregate_overall(result)
         by_regime = aggregate_by_regime(result)

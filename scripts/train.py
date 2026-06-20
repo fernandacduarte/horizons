@@ -36,12 +36,14 @@ def main(cfg: DictConfig) -> None:
     mask_cfg = MaskSamplerConfig.from_dictconfig(cfg.mask)
     train_ds = load_split_dataset(
         "train", mask_config=mask_cfg,
+        split_file=cfg.data.split_file,
         normalize_per_surface=cfg.data.normalize_per_surface,
         init_method=cfg.data.init_method,
         n_masks_per_epoch=cfg.data.n_masks_per_epoch,
     )
     val_ds = load_split_dataset(
         "val", mask_config=mask_cfg,
+        split_file=cfg.data.split_file,
         normalize_per_surface=cfg.data.normalize_per_surface,
         init_method=cfg.data.init_method,
     )
