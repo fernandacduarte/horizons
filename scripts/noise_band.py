@@ -31,6 +31,9 @@ def main() -> None:
     p.add_argument("--n-masks", type=int, default=10)
     p.add_argument("--seeds", type=int, nargs="+",
                    default=[1000, 2000, 3000, 4000, 5000])
+    p.add_argument("--device", default="cpu",
+                   help="device for the model rollout (cpu | cuda); the "
+                        "harmonic baseline always runs on CPU (scipy)")
     args = p.parse_args()
 
     # Read arch / data settings from the run's saved config snapshot
@@ -50,11 +53,12 @@ def main() -> None:
         args.run_dir / "best.pt",
         hidden_dim=hidden_dim, n_message_passing=n_layers,
         conv_type=conv_type, aggr=aggr,
+        device=args.device,
     )
     print(f"checkpoint: {args.run_dir.name}  (hidden={hidden_dim}, layers={n_layers}, "
           f"conv={conv_type}/{aggr}, normalize={normalize}, init={init_method})")
     print(f"eval: {args.split} split, n_masks={args.n_masks}, "
-          f"{len(args.seeds)} mask-draw seeds\n")
+          f"{len(args.seeds)} mask-draw seeds, device={args.device}\n")
 
     regimes = ["half_plane", "outward_free", "outward_pinned"]
     # Collect model overall + per-regime means, and harmonic overall, per seed
@@ -64,7 +68,7 @@ def main() -> None:
             ckpt.model, args.split,
             n_masks_per_surface=args.n_masks, base_seed=seed,
             normalize_per_surface=normalize, init_method=init_method,
-            split_file=split_file,
+            split_file=split_file, device=args.device,
         )
         overall = aggregate_overall(result)
         by_regime = aggregate_by_regime(result)
