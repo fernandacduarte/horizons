@@ -63,6 +63,7 @@ def main() -> None:
     regimes = ["half_plane", "outward_free", "outward_pinned"]
     # Collect model overall + per-regime means, and harmonic overall, per seed
     rows: list[dict] = []
+    all_records: list = []  # every (surface, mask) record across seeds, for per-surface stats
     for seed in args.seeds:
         result = evaluate_split(
             ckpt.model, args.split,
@@ -70,6 +71,7 @@ def main() -> None:
             normalize_per_surface=normalize, init_method=init_method,
             split_file=split_file, device=args.device,
         )
+        all_records.extend(result.records)
         overall = aggregate_overall(result)
         by_regime = aggregate_by_regime(result)
         row = {
@@ -92,6 +94,21 @@ def main() -> None:
                 "model_half_plane", "model_outward_free", "model_outward_pinned"]:
         lo, hi, mu, sd = spread(key)
         print(f"  {key:<24} {lo:7.2f} / {hi:7.2f} / {mu:7.2f}  (std {sd:.2f}, range {hi-lo:.2f})")
+
+    # Per-surface breakdown: where does the model win/lose vs harmonic?
+    by_surface: dict = {}
+    for r in all_records:
+        by_surface.setdefault(r.surface_id, []).append(r)
+    print("\n=== per-surface (mean RMSE over masks x seeds), largest first ===")
+    print(f"  {'surface':<26} {'V':>9} {'model':>8} {'harm':>8} {'d(m-h)':>8}")
+    surf_rows = []
+    for sid, recs in by_surface.items():
+        V = recs[0].n_K + recs[0].n_U
+        m = statistics.mean(r.rmse_model for r in recs)
+        h = statistics.mean(r.rmse_harmonic for r in recs)
+        surf_rows.append((V, sid, m, h))
+    for V, sid, m, h in sorted(surf_rows, reverse=True):
+        print(f"  {sid:<26} {V:>9,} {m:>8.1f} {h:>8.1f} {m - h:>+8.1f}")
 
 
 if __name__ == "__main__":
