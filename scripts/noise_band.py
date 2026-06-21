@@ -99,16 +99,17 @@ def main() -> None:
     by_surface: dict = {}
     for r in all_records:
         by_surface.setdefault(r.surface_id, []).append(r)
-    print("\n=== per-surface (mean RMSE over masks x seeds), largest first ===")
-    print(f"  {'surface':<26} {'V':>9} {'model':>8} {'harm':>8} {'d(m-h)':>8}")
+    print("\n=== per-surface (mean over masks x seeds), largest first ===")
+    print(f"  {'surface':<26} {'V':>9} {'N':>5} {'model':>8} {'harm':>8} {'d(m-h)':>8}")
     surf_rows = []
     for sid, recs in by_surface.items():
         V = recs[0].n_K + recs[0].n_U
+        N = statistics.mean(r.N for r in recs)
         m = statistics.mean(r.rmse_model for r in recs)
         h = statistics.mean(r.rmse_harmonic for r in recs)
-        surf_rows.append((V, sid, m, h))
-    for V, sid, m, h in sorted(surf_rows, reverse=True):
-        print(f"  {sid:<26} {V:>9,} {m:>8.1f} {h:>8.1f} {m - h:>+8.1f}")
+        surf_rows.append((V, N, sid, m, h))
+    for V, N, sid, m, h in sorted(surf_rows, reverse=True):
+        print(f"  {sid:<26} {V:>9,} {N:>5.0f} {m:>8.1f} {h:>8.1f} {m - h:>+8.1f}")
 
 
 if __name__ == "__main__":
