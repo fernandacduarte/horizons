@@ -277,6 +277,26 @@ def train(
                 state.step += 1
                 continue
 
+            # Guard: a finite loss can still backprop a NON-finite gradient
+            # (e.g. the 1/||n|| term in vertex-normal normalization on a
+            # near-degenerate normal during a deep rollout). clip_grad_norm_
+            # cannot sanitize NaN/Inf — clipping by a NaN norm yields NaN
+            # grads — so an unguarded step corrupts the weights to NaN, after
+            # which every surface NaNs and the run cannot recover. Skip instead.
+            grads_finite = all(
+                torch.isfinite(p.grad).all()
+                for p in model.parameters() if p.grad is not None
+            )
+            if not grads_finite:
+                if verbose:
+                    print(
+                        f"  step {state.step}: non-finite GRADIENT; skipping "
+                        f"optimizer step (weights preserved)"
+                    )
+                optimizer.zero_grad()
+                state.step += 1
+                continue
+
             torch.nn.utils.clip_grad_norm_(
                 model.parameters(), max_norm=grad_clip_norm,
             )
