@@ -1425,7 +1425,7 @@ large-surface run.
 
 ### D12.3 — Phase-2 split: large surfaces, magnitude-balanced
 
-**Decision:** A new canonical split (`data/splits/split_v1.json`) for Phase 2
+**Decision:** A new canonical split (`data/splits/split_v2.json`) for Phase 2
 that adds the eight V>50k, V≤600k surfaces (110k–455k) to the Stage-4 small
 split, placed by hand to balance mesh magnitude across sets:
 - **train (+4):** 15TopoSal (195k), 16TopoAndarAlagoas (192k),
@@ -1439,7 +1439,7 @@ excluded for tractable epoch time. Result: train 34, val 9, test_id 7,
 test_ood 5 (R7, unchanged).
 
 **Where:** generated reproducibly by `scripts/build_phase2_split.py` (explicit,
-non-seeded placement); the resulting `split_v1.json` is committed — unlike
+non-seeded placement); the resulting `split_v2.json` is committed — unlike
 O15's split, which lived only on the container and was lost.
 
 **Why hand-balanced rather than stratified:** with only 8 large surfaces a
@@ -1454,6 +1454,36 @@ always reporting the per-surface decomposition.
 **Status:** Phase-2 canonical split. Phase-1 results were on the prior
 7-surface val and are not directly comparable; each phase is baselined on its
 own val.
+
+### D12.4 — Non-finite gradient guard in the training loop
+
+**Decision:** Before clipping and the optimizer step, the loop checks that every
+accumulated parameter gradient is finite; if any is NaN/Inf it zeroes the grads,
+logs a warning, and skips the step — the same philosophy as the existing
+non-finite-*loss* skip (D8.1).
+
+**Where:** `horizons/training/loop.py` (batch loop, before `clip_grad_norm_`).
+Test: `tests/test_loop.py::test_nonfinite_gradient_guard_preserves_weights`.
+
+**Why:** Phase-2's first run died at epoch 91 after 90 clean epochs. A *finite*
+loss back-propagated a *non-finite* gradient — most likely the `1/‖n‖` term in
+vertex-normal normalization (`compute_vertex_normals`, eps=1e-12) blowing up on
+a near-degenerate normal during a deep rollout, far more likely now with the
+large surfaces' N≈150–200 rollouts. The existing guards could not catch it: the
+loss-finiteness check skips NaN *losses*, not finite-loss/NaN-gradient cases,
+and `clip_grad_norm_` cannot sanitize NaN/Inf (clipping by a NaN norm yields NaN
+grads). So the poisoned gradient flowed into `optimizer.step()` and turned every
+weight to NaN; thereafter every surface NaN'd, the loop skipped them all, and
+the epoch aborted with "No successful surfaces." The guard makes a non-finite
+*gradient* a skip, exactly like a non-finite loss, so one pathological batch can
+no longer corrupt the weights.
+
+**Trade-off:** a genuinely informative-but-explosive batch is dropped rather
+than clipped. Acceptable — a corrupted run loses everything, a skipped batch
+loses one update. If skips become frequent, the root-cause fix is to raise the
+normals `eps` (1e-12 → ~1e-6), bounding the normalization gradient at source.
+
+**Status:** In effect from Phase 2. Default-on (no flag); applies to every run.
 
 ---
 
