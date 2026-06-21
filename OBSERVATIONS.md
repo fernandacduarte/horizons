@@ -1801,6 +1801,88 @@ its own val.
 
 ---
 
+## O19 — Phase-2 baseline: with large surfaces in play, harmonic infill beats the GNN
+
+**Observed in:** Phase-2 baseline run — Stage 11.8 hyperparameters (SAGE,
+hidden=64, 2 layers, normalize, meanplane, n_masks=3) on the magnitude-balanced
+split_v2 (D12.3), n_epochs=200, patience=40, grad_checkpoint=true, seed=42, on
+the GPU container. The first attempt crashed at epoch 91 (NaN weights; fixed by
+the gradient guard D12.4); the rerun completed, best epoch 54. Evaluated on the
+9-surface val with `scripts/noise_band.py` (5 mask-draw seeds, n_masks=10,
+device=cuda).
+
+### Aggregate: harmonic wins by ~13 m, on every seed
+
+| method | min–max | mean | std |
+|---|---|---|---|
+| GNN model | 90.0 – 104.8 | **96.6** | 5.7 |
+| harmonic | 76.3 – 96.7 | **83.7** | 8.4 |
+
+Paired by mask seed (harmonic − model): −12.0, −8.2, −17.1, −16.1, −11.3 —
+harmonic better on all 5 (mean +12.9 m). This is the reverse of Phase 1, where
+the two were tied at ~72 m (O16). Adding the large surfaces flips the aggregate
+to harmonic's favour.
+
+### Per-surface: the GNN's edge is intact on small surfaces, lost on large ones
+
+Mean RMSE over masks × seeds (Δ = model − harmonic; positive = harmonic better):
+
+| surface | V | model | harmonic | Δ |
+|---|---|---|---|---|
+| 02TopoMioceno | 443k | 202.2 | 174.3 | +28.0 |
+| 04BaseOligoMioceno | 110k | 111.2 | 70.7 | +40.5 |
+| 05_TopoCretaceo | 48k | 312.9 | 224.7 | +88.2 |
+| 10_BaseModelo | 48k | 0.0 | 0.0 | 0.0 |
+| 09_Horizonte8 | 2.4k | 133.5 | 122.3 | +11.3 |
+| horizonte7 | 9.7k | 0.6 | 2.6 | −2.0 |
+| Horizonte5 | 9.7k | 0.6 | 2.7 | −2.0 |
+| TestHorizon7 | 2.4k | 58.9 | 78.1 | −19.2 |
+| TestHorizon4 | 2.4k | 49.6 | 78.0 | −28.4 |
+
+The GNN still **wins** on the small extrapolation surfaces (TestHorizon4 −28,
+TestHorizon7 −19, horizonte7/Horizonte5 ~−2) — the Phase-1 picture holds. The
+entire aggregate loss is three surfaces: the two large ones (443k +28, 110k +40)
+and the pathologically hard 05_TopoCretaceo (+88, both methods awful).
+
+### Interpretation: a rollout-depth scaling problem, not capacity
+
+The deficit vs harmonic is **size/depth-graded**: the GNN wins on the 2.4k
+surfaces, ties on the flat 48k one, and loses progressively on 110k → 443k.
+Crucially the model *was* trained on four large surfaces (192k–455k), so this is
+not "never seen large" — it is a failure to *generalise* to large val surfaces.
+Most plausible mechanism: filling a large surface needs an N≈150–200 step
+rollout and per-step error accumulates over that depth, whereas harmonic infill
+solves the whole field in one global linear solve and pays no depth penalty.
+This points at the **rollout formulation** (deep-rollout error accumulation) as
+the scaling bottleneck — consistent with O18's finding that the operator and
+capacity are not the lever.
+
+### Implications
+
+- Phase 1's conclusion strengthens rather than overturns: the learned operator's
+  advantage is real but narrow (small-surface extrapolation); classical infill
+  wins once large smooth surfaces dominate the evaluation.
+- Capacity-first tuning (the Phase-2 plan) is now in doubt as a fix — a
+  depth-of-rollout problem is unlikely to be solved by wider/deeper layers. A
+  quick width/depth check can confirm it, but the more achievable result is to
+  **characterise the GNN-vs-harmonic crossover as a function of rollout depth**.
+
+### Where the result lives
+
+- Checkpoint: `outputs/tensorboard/run_20260621_171110/best.pt` (best epoch 54).
+- Eval: `scripts/noise_band.py` on that run, split_v2 val, seeds 1000–5000,
+  n_masks=10, device=cuda.
+
+### Caveats
+
+- **Single training seed.** Per O16, per-regime aggregates are noisy (the 443k
+  val surface widens the bands); the per-surface means (over masks × seeds) are
+  the reliable cut, not the per-regime numbers.
+- **best.pt is from a noisy plateau** (training-time val bounced ~98–130 m), so
+  the checkpoint selection on this large-surface val is itself uncertain.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:
