@@ -73,6 +73,7 @@ def evaluate_surface(
     normalize_per_surface: bool = False,
     init_method: str = "meanplane",
     device: str | torch.device = "cpu",
+    rollout_method: str = "standard",
 ) -> SurfaceEvalResult:
     """Run the model on one surface and compute per-ring metrics.
 
@@ -152,6 +153,7 @@ def evaluate_surface(
         z0=z0, z_true=z_true,
         V_xy=V_xy, F=F, edge_index=edge_index,
         mask=mask, d=d, N=N,
+        rollout_method=rollout_method,
     )
 
     z_final = result.z_trajectory[-1]

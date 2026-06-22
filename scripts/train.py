@@ -104,6 +104,7 @@ def main(cfg: DictConfig) -> None:
             accum_steps=cfg.optim.accum_steps,
             best_metric=cfg.train.best_metric,
             use_checkpoint=cfg.train.grad_checkpoint,
+            rollout_method=cfg.rollout.method,
         )
     finally:
         writer.close()

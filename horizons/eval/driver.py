@@ -62,6 +62,7 @@ def evaluate_split(
     normalize_per_surface: bool = False,
     init_method: str = "meanplane",
     split_file: str | Path = "data/splits/split_v1.json",
+    rollout_method: str = "standard",
 ) -> EvalResult:
     """Evaluate model + baselines on every surface in a split, with
     multiple mask samples per surface.
@@ -96,6 +97,7 @@ def evaluate_split(
                 model, surface, sampler, rng_seed=seed, device=device,
                 normalize_per_surface=normalize_per_surface,
                 init_method=init_method,
+                rollout_method=rollout_method,
             )
 
             # Now compute baselines on the SAME mask. We have to re-sample

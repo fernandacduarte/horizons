@@ -59,6 +59,7 @@ def main() -> None:
     )
     init_method = cfg.get("data", {}).get("init_method", "meanplane")
     split_file = cfg.get("data", {}).get("split_file", "data/splits/split_v1.json")
+    rollout_method = cfg.get("rollout", {}).get("method", "standard")
     conv_type = cfg.get("model", {}).get("type", "sage")
     aggr = cfg.get("model", {}).get("aggr", "mean")
 

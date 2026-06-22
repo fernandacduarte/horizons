@@ -70,6 +70,7 @@ def rollout(
     d: torch.Tensor,              # (n,) int64
     N: int,
     use_checkpoint: bool = False,
+    rollout_method: str = "standard",
 ) -> RolloutResult:
     """Run the iterative rollout for N steps.
 
@@ -91,12 +92,17 @@ def rollout(
     """
     if N < 1:
         raise ValueError(f"N must be >= 1; got {N}")
+    if rollout_method not in ("standard", "freeze_filled"):
+        raise ValueError(
+            f"unknown rollout_method {rollout_method!r}; "
+            f"expected 'standard' or 'freeze_filled'"
+        )
 
     z_traj: list[torch.Tensor] = [z0]
     dz_traj: list[torch.Tensor] = []
 
     z_t = z0
-    for _ in range(N):
+    for step in range(1, N + 1):
         # Predict the residual. With use_checkpoint, gradient-checkpoint the
         # operator forward: its (per-edge) activations are recomputed during
         # backward instead of retained, turning peak memory from O(N) to O(1)
@@ -112,13 +118,14 @@ def rollout(
         else:
             dz_t = model(z_t, V_xy, edge_index, F, mask, d)
 
-        # Apply correction
-        z_t_unanchored = z_t + dz_t
-
-        # Re-anchor: known vertices return to z_true; unknown vertices
-        # keep the corrected value. torch.where is differentiable;
-        # gradients only flow through the unknown branch.
-        z_t = torch.where(mask, z_true, z_t_unanchored)
+        # Apply correction. "standard" updates every unknown vertex each step,
+        # so rings behind the frontier keep being nudged and may drift.
+        # "freeze_filled" freezes a ring once it is behind the frontier
+        # (d < step) — only the frontier and beyond (d >= step) are updated, so
+        # already-filled predictions can no longer re-drift. K is always anchored.
+        active = (~mask) & (d >= step) if rollout_method == "freeze_filled" else ~mask
+        z_t_candidate = torch.where(active, z_t + dz_t, z_t)
+        z_t = torch.where(mask, z_true, z_t_candidate)
 
         z_traj.append(z_t)
         dz_traj.append(dz_t)

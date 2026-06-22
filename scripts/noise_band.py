@@ -48,6 +48,7 @@ def main() -> None:
     conv_type = cfg.get("model", {}).get("type", "sage")
     aggr = cfg.get("model", {}).get("aggr", "mean")
     split_file = cfg.get("data", {}).get("split_file", "data/splits/split_v1.json")
+    rollout_method = cfg.get("rollout", {}).get("method", "standard")
 
     ckpt = load_checkpoint(
         args.run_dir / "best.pt",
@@ -70,6 +71,7 @@ def main() -> None:
             n_masks_per_surface=args.n_masks, base_seed=seed,
             normalize_per_surface=normalize, init_method=init_method,
             split_file=split_file, device=args.device,
+            rollout_method=rollout_method,
         )
         all_records.extend(result.records)
         overall = aggregate_overall(result)

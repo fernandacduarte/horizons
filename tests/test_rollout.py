@@ -246,3 +246,58 @@ class TestCheckpoint:
         assert torch.allclose(z_plain, z_ckpt, atol=1e-6)
         assert torch.allclose(loss_plain, loss_ckpt, atol=1e-6)
         assert torch.allclose(g_plain, g_ckpt, atol=1e-5)
+
+# ----------------------------------------------------------------------
+# Freeze filled
+# ----------------------------------------------------------------------
+class TestFrezeFilled:
+    def test_freeze_filled_locks_behind_frontier_rings(self):
+        """freeze_filled: a ring stops updating once the frontier passes it
+        (d < step); standard keeps updating it."""
+        import torch
+        import torch.nn as nn
+        from pathlib import Path
+        from horizons.data.mesh import HorizonSurface
+        from horizons.data.masking import MaskSampler, MaskSamplerConfig
+        from horizons.data.init import init_z
+        from horizons.training.rollout import rollout
+
+        surface = HorizonSurface.from_npz(Path(__file__).parent / "fixtures" / "anticline.npz")
+        mask, d, _ = MaskSampler(MaskSamplerConfig()).sample(surface, torch.Generator().manual_seed(0))
+        N = int(d.max().item())
+        z0 = init_z(surface.V, mask)
+
+        class ConstDz(nn.Module):
+            def forward(self, z, *args):
+                return torch.ones_like(z)
+
+        common = dict(z0=z0, z_true=surface.V[:, 2], V_xy=surface.V[:, :2],
+                    F=surface.F, edge_index=surface.edge_index, mask=mask, d=d, N=N)
+        std = rollout(ConstDz(), rollout_method="standard", **common)
+        frz = rollout(ConstDz(), rollout_method="freeze_filled", **common)
+
+        k = 1
+        ring = (~mask) & (d == k)
+        assert ring.any()
+        zk = frz.z_trajectory[k][ring]
+        for t in range(k, N + 1):                      # frozen from step k onward
+            assert torch.allclose(frz.z_trajectory[t][ring], zk)
+        assert not torch.allclose(std.z_trajectory[N][ring],
+                                std.z_trajectory[k][ring])  # standard keeps moving
+
+
+    def test_unknown_rollout_method_raises(self):
+        import pytest
+        import torch
+        import torch.nn as nn
+        from horizons.training.rollout import rollout
+
+        class M(nn.Module):
+            def forward(self, *a):
+                return torch.zeros(3)
+
+        with pytest.raises(ValueError, match="unknown rollout_method"):
+            rollout(M(), z0=torch.zeros(3), z_true=torch.zeros(3), V_xy=torch.zeros(3, 2),
+                    F=torch.zeros((0, 3), dtype=torch.long), edge_index=torch.tensor([[0, 1], [1, 0]]),
+                    mask=torch.tensor([True, False, False]), d=torch.tensor([0, 1, 2]), N=2,
+                    rollout_method="bogus")

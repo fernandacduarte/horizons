@@ -104,3 +104,6 @@ train:
   log_dir: outputs/tensorboard
   ckpt_dir: outputs/checkpoints
   ckpt_keep_last: 3                  # rolling latest-N checkpoints
+
+rollout:
+  method: standard                   # standard | freeze_filled  (Phase-3 rollout variants)

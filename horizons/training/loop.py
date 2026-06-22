@@ -117,6 +117,7 @@ def train(
     accum_steps: int = 1,
     best_metric: str = "val_loss",
     use_checkpoint: bool = False,
+    rollout_method: str = "standard",
 ) -> TrainState:
     """Train a horizon-extrapolation model.
 
@@ -236,6 +237,7 @@ def train(
                     V_xy=V_xy, F=F, edge_index=edge_index,
                     mask=mask, d=d, N=N,
                     use_checkpoint=use_checkpoint,
+                    rollout_method=rollout_method,
                 )
                 loss_dict = rollout_loss(
                     z_trajectory=result.z_trajectory,
