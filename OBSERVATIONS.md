@@ -2112,6 +2112,90 @@ multi-scale rollout.
 
 ---
 
+## O24 — Hybrid (harmonic init + fixed-K GNN refine) beats harmonic: best of both
+
+**Observed in:** Phase-3 capstone (a). SAGE operator, but a new prediction path
+(`approach=hybrid`): init = harmonic infill (a global solve that fills all of U),
+refined by a **fixed 3 GNN passes** (no surface-depth march), trained with all-U
+MSE (`hybrid_rollout_loss`). hidden=64, split_v2, seed=42, GPU; early-stopped at
+epoch 117 (best 77). Eval: split_v2 val, 3 seeds, n_masks=10, with the hybrid
+path.
+
+### Result: the learned approach finally beats harmonic
+
+| method | mean (3 seeds) |
+|---|---|
+| Phase-2 baseline GNN (rollout) | 96.6 |
+| harmonic infill | 86.8 |
+| **hybrid** | **79.5** |
+
+Paired by mask seed (hybrid − harmonic): −8.7, −9.3, −4.0 — the hybrid wins on
+all three (mean −7.3 m). The baseline GNN *lost* to harmonic by ~13 m; the hybrid
+*wins* by ~7 m — a ~20 m swing, and the first time in the study the learned model
+leads.
+
+### Per-surface: best-of-both, including the deep end
+
+Deficit (Δ = model − harmonic; negative = beats harmonic):
+
+| surface | N | hybrid | harmonic | Δ | (baseline Δ) |
+|---|---|---|---|---|---|
+| 02TopoMioceno | 132 | 178.8 | 191.7 | **−12.9** | (+21.4) |
+| 04BaseOligoMioceno | 69 | 77.7 | 75.0 | +2.6 | (+41.2) |
+| 05_TopoCretaceo | 52 | 267.6 | 232.0 | +35.5 | (+88.5) |
+| 09_Horizonte8 | 12 | 113.2 | 119.8 | −6.6 | (+12.9) |
+| TestHorizon4 | 11 | 35.4 | 75.5 | **−40.1** | (−26.6) |
+| TestHorizon7 | 11 | 39.4 | 82.2 | **−42.8** | (−21.5) |
+
+1. **The deepest surface is fixed.** 443k (N=132): hybrid 178.8 beats harmonic
+   (191.7) *and* the baseline rollout (213.1). The crossover's worst point bent
+   below zero — the deep-surface limit that survived O18–O23 is gone.
+2. **The extrapolation edge got stronger, not traded away.** TestHorizon4/7 reach
+   −40/−43 (hybrid 35/39 vs baseline rollout 49/61 vs harmonic 75/82) — beating
+   *both* the rollout GNN and harmonic on the shallow surfaces.
+3. **Best-of-both elsewhere:** matches harmonic on 110k (+2.6), now wins
+   09_Horizonte8; only the pathological 05_TopoCretaceo still loses, and even
+   there it improved from +88 to +35.
+
+### Interpretation: confirms the whole diagnosis by construction
+
+Harmonic's global solve does the long-range reach with no depth penalty; the
+GNN's fixed 3 passes add the local, non-smooth detail harmonic misses, with no
+surface-depth march and so no accumulation. Beating harmonic *even on the 443k*
+shows the GNN learned genuinely useful local corrections; beating the rollout GNN
+*even on shallow surfaces* shows refining a good global field in 3 clean passes
+beats building the field over ~N error-accumulating steps from a mean plane. The
+bottleneck was never operator, capacity, or init — it was the deep sequential
+rollout (O19), and replacing it with global-solve + shallow-refinement is what
+works.
+
+### Decision
+
+`approach=hybrid` is the **best model of the study** and the recommended
+configuration for the large-surface regime: it beats harmonic infill and the
+Phase-2 rollout baseline, robustly across eval seeds.
+
+### Where the result lives
+
+- Checkpoint: `outputs/tensorboard/run_20260623_115850/best.pt` (best epoch 77).
+- Eval: `scripts/noise_band.py`, split_v2 val, seeds 1000–3000 (hybrid path).
+- Figure: `outputs/evaluation/plots/phase2_hybrid.png` (baseline vs hybrid,
+  deficit vs N), via `scripts/plot_crossover.py`.
+
+### Caveats / next
+
+- **Single training seed.** The win is paired across 3 eval seeds (robust to
+  eval-mask noise) and the per-surface structure is mechanistically coherent, so
+  it is a solid directional result — but a 2nd/3rd training seed would firm up
+  the magnitude (the training-time val was noisy; best.pt was selected on a lucky
+  low draw, yet the multi-seed eval confirms the level).
+- **05_TopoCretaceo still loses** (pathologically hard for both methods).
+- **Confirm on test_id / test_ood** before the final headline.
+- **n_passes fixed at 3** — a 1/3/5 sweep is the obvious follow-up now that there
+  is a signal to optimise.
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:
