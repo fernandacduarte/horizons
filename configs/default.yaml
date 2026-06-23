@@ -59,6 +59,9 @@ features:
 #   - placeholder: TinySAGE (Stage 5 sanity-check only)
 model_kind: operator
 
+# Prediction approach (Phase 3): 
+approach: rollout # rollout (standard) | hybrid (harmonic init + GNN refine)
+
 model:
   type: sage                         # sage | edgeconv | gmm (sage default)
   n_layers: 2                        # message-passing depth
@@ -107,3 +110,6 @@ train:
 
 rollout:
   method: standard                   # standard | freeze_filled  (Phase-3 rollout variants)
+
+hybrid:
+  n_passes: 3                        # GNN refinement passes over the harmonic-filled field (fixed, depth-independent)

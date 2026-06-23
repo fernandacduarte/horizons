@@ -14,7 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 from horizons.data.dataset import HorizonDataset
 from horizons.eval.validate import validate
 from horizons.training.rollout import rollout
-from horizons.training.loss import rollout_loss
+from horizons.training.loss import rollout_loss, hybrid_rollout_loss
 
 
 def compute_lr(
@@ -118,6 +118,8 @@ def train(
     best_metric: str = "val_loss",
     use_checkpoint: bool = False,
     rollout_method: str = "standard",
+    approach: str = "rollout",
+    hybrid_n_passes: int = 3,
 ) -> TrainState:
     """Train a horizon-extrapolation model.
 
@@ -229,7 +231,10 @@ def train(
                 edge_index = item["edge_index"].to(device)
                 mask = item["mask"].to(device)
                 d = item["d"].to(device)
-                N = item["N"]
+                                # hybrid: harmonic-filled init, refined by a fixed shallow number
+                # of passes (no surface-depth march), supervised by all-U MSE.
+                # rollout: the standard surface-depth rollout + per-ring loss.
+                N = hybrid_n_passes if approach == "hybrid" else item["N"]
 
                 result = rollout(
                     model,
@@ -239,13 +244,16 @@ def train(
                     use_checkpoint=use_checkpoint,
                     rollout_method=rollout_method,
                 )
-                loss_dict = rollout_loss(
-                    z_trajectory=result.z_trajectory,
-                    dz_trajectory=result.dz_trajectory,
-                    z_true=z_true, d=d, edge_index=edge_index, mask=mask,
-                    lambda_f=lambda_f, lambda_p=lambda_p,
-                    lambda_c=lambda_c, lambda_r=lambda_r,
-                )
+                if approach == "hybrid":
+                    loss_dict = hybrid_rollout_loss(result.z_trajectory, z_true, mask)
+                else:
+                    loss_dict = rollout_loss(
+                        z_trajectory=result.z_trajectory,
+                        dz_trajectory=result.dz_trajectory,
+                        z_true=z_true, d=d, edge_index=edge_index, mask=mask,
+                        lambda_f=lambda_f, lambda_p=lambda_p,
+                        lambda_c=lambda_c, lambda_r=lambda_r,
+                    )
                 loss = loss_dict["total"]
 
                 if not torch.isfinite(loss):
@@ -353,6 +361,7 @@ def train(
                 model, val_dataset,
                 lambda_f=lambda_f, lambda_p=lambda_p,
                 lambda_c=lambda_c, lambda_r=lambda_r,
+                approach=approach, hybrid_n_passes=hybrid_n_passes,
             )
             val_record = {
                 "epoch": epoch,

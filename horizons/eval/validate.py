@@ -13,6 +13,7 @@ from horizons.training.rollout import rollout
 from horizons.training.loss import (
     rollout_loss,
     per_iteration_data_loss,
+    hybrid_rollout_loss
 )
 
 
@@ -24,6 +25,8 @@ def validate(
     lambda_p: float = 0.1,
     lambda_c: float = 0.01,
     lambda_r: float = 0.001,
+    approach: str = "rollout",
+    hybrid_n_passes: int = 3,
 ) -> dict:
     """Compute mean validation loss and per-surface diagnostics.
 
@@ -71,7 +74,8 @@ def validate(
         edge_index = item["edge_index"].to(device)
         mask = item["mask"].to(device)
         d = item["d"].to(device)
-        N = item["N"]
+        surface_N = item["N"]
+        N = hybrid_n_passes if approach == "hybrid" else surface_N
 
         result = rollout(
             model,
@@ -79,13 +83,16 @@ def validate(
             V_xy=V_xy, F=F, edge_index=edge_index,
             mask=mask, d=d, N=N,
         )
-        loss_dict = rollout_loss(
-            z_trajectory=result.z_trajectory,
-            dz_trajectory=result.dz_trajectory,
-            z_true=z_true, d=d, edge_index=edge_index, mask=mask,
-            lambda_f=lambda_f, lambda_p=lambda_p,
-            lambda_c=lambda_c, lambda_r=lambda_r,
-        )
+        if approach == "hybrid":
+            loss_dict = hybrid_rollout_loss(result.z_trajectory, z_true, mask)
+        else:
+            loss_dict = rollout_loss(
+                z_trajectory=result.z_trajectory,
+                dz_trajectory=result.dz_trajectory,
+                z_true=z_true, d=d, edge_index=edge_index, mask=mask,
+                lambda_f=lambda_f, lambda_p=lambda_p,
+                lambda_c=lambda_c, lambda_r=lambda_r,
+            )
 
         # Compute RMSE on U at final iteration. The model operates in
         # (possibly normalized) centered units, so residuals are in those
@@ -110,7 +117,7 @@ def validate(
             "surface_id": item["surface_id"],
             "reservoir_id": item["reservoir_id"],
             "regime": item["regime"],
-            "N": N,
+            "N": surface_N,
             "loss_total": loss_dict["total"].item(),
             "rmse_centered": rmse_centered,
             "rmse_meters": rmse_meters,

@@ -60,6 +60,8 @@ def main() -> None:
     init_method = cfg.get("data", {}).get("init_method", "meanplane")
     split_file = cfg.get("data", {}).get("split_file", "data/splits/split_v1.json")
     rollout_method = cfg.get("rollout", {}).get("method", "standard")
+    approach = cfg.get("approach", "rollout")
+    hybrid_n_passes = int(cfg.get("hybrid", {}).get("n_passes", 3))
     conv_type = cfg.get("model", {}).get("type", "sage")
     aggr = cfg.get("model", {}).get("aggr", "mean")
 
@@ -97,6 +99,8 @@ def main() -> None:
         normalize_per_surface=normalize_per_surface,
         init_method=init_method,
         split_file=split_file,
+        approach=approach, 
+        hybrid_n_passes=hybrid_n_passes,
     )
 
     # Save JSON

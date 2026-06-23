@@ -209,7 +209,29 @@ def rollout_loss(
         "res": total_res,
     }
 
+def hybrid_rollout_loss(
+    z_trajectory: list[torch.Tensor],
+    z_true: torch.Tensor,
+    mask: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+    """All-U MSE for the hybrid approach (harmonic init + fixed-K refinement).
 
+    Unlike rollout_loss there is no advancing frontier — harmonic infill has
+    already filled every unknown vertex — so the whole unknown set U is
+    supervised at every refinement pass. Returns the same dict shape as
+    rollout_loss ("total"/"data"/"curv"/"res") so the training-loop logging is
+    unchanged; curv/res are zero (data-only for now).
+    """
+    unknown = ~mask
+    zero = z_trajectory[0].new_zeros(())
+    if not unknown.any():
+        return {"total": zero, "data": zero, "curv": zero, "res": zero}
+
+    total = zero.clone()
+    for z_t in z_trajectory[1:]:        # skip z^0 (the harmonic init); supervise each pass
+        total = total + (z_t[unknown] - z_true[unknown]).pow(2).mean()
+    return {"total": total, "data": total, "curv": zero.clone(), "res": zero.clone()}
+    
 # ======================================================================
 # Backwards-compat alias: keep rollout_data_loss for Stage 5/6 tests
 # ======================================================================

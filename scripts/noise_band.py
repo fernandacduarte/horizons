@@ -49,6 +49,8 @@ def main() -> None:
     aggr = cfg.get("model", {}).get("aggr", "mean")
     split_file = cfg.get("data", {}).get("split_file", "data/splits/split_v1.json")
     rollout_method = cfg.get("rollout", {}).get("method", "standard")
+    approach = cfg.get("approach", "rollout")
+    hybrid_n_passes = int(cfg.get("hybrid", {}).get("n_passes", 3))
 
     ckpt = load_checkpoint(
         args.run_dir / "best.pt",
@@ -72,6 +74,7 @@ def main() -> None:
             normalize_per_surface=normalize, init_method=init_method,
             split_file=split_file, device=args.device,
             rollout_method=rollout_method,
+            approach=approach, hybrid_n_passes=hybrid_n_passes,
         )
         all_records.extend(result.records)
         overall = aggregate_overall(result)

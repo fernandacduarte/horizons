@@ -74,6 +74,8 @@ def evaluate_surface(
     init_method: str = "meanplane",
     device: str | torch.device = "cpu",
     rollout_method: str = "standard",
+    approach: str = "rollout",
+    hybrid_n_passes: int = 3,
 ) -> SurfaceEvalResult:
     """Run the model on one surface and compute per-ring metrics.
 
@@ -138,6 +140,11 @@ def evaluate_surface(
     )
     N = int(d.max().item())
 
+    # hybrid runs a fixed shallow rollout from the harmonic-filled field;
+    # standard marches the full surface depth. N (surface depth) is kept for the
+    # per-ring breakdown and the record, so hybrid points land at their true N.
+    rollout_N = hybrid_n_passes if approach == "hybrid" else N
+
     # Move to device
     V_xy = V_centered[:, :2].to(device)
     F = surface.F.to(device)
@@ -152,7 +159,7 @@ def evaluate_surface(
         model,
         z0=z0, z_true=z_true,
         V_xy=V_xy, F=F, edge_index=edge_index,
-        mask=mask, d=d, N=N,
+        mask=mask, d=d, N=rollout_N,
         rollout_method=rollout_method,
     )
 

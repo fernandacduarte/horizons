@@ -32,6 +32,12 @@ from horizons.training.loop import train
 def main(cfg: DictConfig) -> None:
     torch.manual_seed(cfg.seed)
 
+    if cfg.approach == "hybrid" and cfg.data.init_method != "harmonic":
+        raise ValueError(
+            "approach=hybrid requires data.init_method=harmonic "
+            "(the hybrid refines the harmonic-filled field)"
+        )
+
     # Build datasets
     mask_cfg = MaskSamplerConfig.from_dictconfig(cfg.mask)
     train_ds = load_split_dataset(
@@ -64,7 +70,8 @@ def main(cfg: DictConfig) -> None:
         raise ValueError(f"Unknown model_kind: {model_kind!r}")
 
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"Model: {model_kind} ({cfg.model.type}, aggr={cfg.model.aggr}) | params: {n_params:,}\n")
+    print(f"Model: {model_kind} ({cfg.model.type}, aggr={cfg.model.aggr}) "
+          f"| approach: {cfg.approach} | params: {n_params:,}\n")
 
     # Set up TensorBoard run directory
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -105,6 +112,8 @@ def main(cfg: DictConfig) -> None:
             best_metric=cfg.train.best_metric,
             use_checkpoint=cfg.train.grad_checkpoint,
             rollout_method=cfg.rollout.method,
+            approach=cfg.approach,
+            hybrid_n_passes=cfg.hybrid.n_passes,
         )
     finally:
         writer.close()
