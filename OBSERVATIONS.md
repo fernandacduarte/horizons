@@ -2245,7 +2245,45 @@ Phase-2 rollout baseline, robustly across eval seeds.
 - **05_TopoCretaceo still loses** (pathologically hard for both methods).
 - **Confirm on test_id / test_ood** before the final headline.
 - **n_passes fixed at 3** — a 1/3/5 sweep is the obvious follow-up now that there
-  is a signal to optimise.
+  is a signal to optimise (done in O25).
+
+---
+
+## O25 — n_passes sweep: the hybrid win is robust to K (1, 3, 5 all beat harmonic)
+
+**Observed in:** the O24 hybrid re-run at n_passes ∈ {1, 3, 5} (otherwise
+identical: harmonic init, split_v2, seed=42, GPU). Eval: split_v2 val, 3 seeds,
+n_masks=10.
+
+### Result: all K beat harmonic; K=3 nominally best, within noise of K=1/5
+
+| n_passes | overall | vs harmonic (86.8) | 443k (N=132) Δ | TestHorizon4 (N=11) Δ |
+|---|---|---|---|---|
+| 1 | 81.6 | −5.2 | −5.2 | −26.0 |
+| 3 (O24) | **79.5** | **−7.3** | **−12.9** | **−40.1** |
+| 5 | 82.1 | −4.7 | −9.4 | −23.4 |
+
+Every K beats harmonic overall and on the deepest surface. K=3 is nominally best,
+but the overall spread across K (79.5–82.1, ~2.5 m) is inside the ~4 m eval-mask
+floor (O16), so K=3 is not robustly distinguishable from K=1 or K=5 — and the
+larger-looking K=3 per-surface gaps (e.g. TestHorizon4 −40 vs −26/−23) are likely
+partly single-seed checkpoint noise.
+
+### Interpretation
+
+The headline is the robustness: **the hybrid beats harmonic at every K tried**, so
+the O24 win is a property of the approach, not a fragile hyperparameter choice.
+Even **a single refinement pass (K=1)** beats harmonic and pulls the 443k below
+zero — one local GNN correction on the harmonic-filled field is already enough.
+Returns saturate by ~3 passes; K=5 adds nothing over K=1 (more passes give the
+local refinement more receptive field but no further reach, which harmonic
+already provided). K=3 is kept as the final configuration (nominal best).
+
+### Where the result lives
+
+- K=1: `outputs/tensorboard/run_20260623_213059`; K=3 (O24):
+  `run_20260623_115850`; K=5: `run_20260623_194150`. Eval via `noise_band.py`,
+  split_v2 val, seeds 1000–3000.
 
 ---
 
