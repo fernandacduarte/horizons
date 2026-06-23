@@ -13,6 +13,59 @@ why we think it happens, and any implications for downstream work.
 
 ---
 
+## Summary — the three-phase arc
+
+The project set out to learn a GNN that extrapolates geological horizons through
+an iterative rollout, and to ask whether it could beat the classical baseline,
+harmonic infill. The answer turned out to hinge entirely on **rollout depth**,
+and the work unfolded in three phases.
+
+**Phase 1 — small data (V ≤ 48k): a tie, and an exhaustive null search.** On the
+original 30-surface dataset the learned model matched harmonic infill but never
+clearly beat it. Every lever we pulled — coordinate normalization (O6),
+initialization (O7), mask augmentation (O8/O9), regime weighting (O10),
+regularizer strength, network width (O12), depth (O13), and even a different
+message-passing operator (EdgeConv, O18) — moved validation error by less than
+the measurement noise (O16). The model was neither capacity- nor
+operator-limited; it sat on a plateau, tied with the classical method. Plain
+SAGE (Stage 11.8) was the best configuration.
+
+**Phase 2 — the full dataset, and a clear failure with a clear cause.** Gradient
+checkpointing (D12.2) lifted the memory wall that had excluded the large surfaces
+(110k–455k vertices), so the study restarted on a magnitude-balanced split
+(D12.3) that included them. Now the learned model clearly *lost* to harmonic
+(O19) — but breaking the error down per surface showed exactly why. The GNN's
+advantage holds at shallow rollout depth (small surfaces, true extrapolation)
+and **inverts as the rollout deepens**, with a crossover around N ≈ 25–50. The
+reason is structural: filling a large surface needs an N ≈ 150-step rollout, and
+per-step error accumulates over that depth, while harmonic solves the whole field
+in one global step with no depth penalty.
+
+**Phase 2/3 — every fix to the rollout fails, which sharpens the diagnosis.** If
+depth is the problem, what cures it? Nothing that tweaks the rollout did: more
+capacity (O20), a harmonic starting point (O21), a heavier per-step penalty
+(O22), and freezing already-filled rings (O23) all made the deep surfaces
+*worse*. O23 was the most informative — freezing hurt, which means the rollout's
+repeated updates are beneficial *refinement*, not harmful drift. The iterative
+process does the right thing; it simply cannot converge well enough over ~150
+steps. Every model-side intervention left the deepest surface worse than the
+plain baseline.
+
+**Phase 3 — replace the rollout, and the learned model finally wins (O24).** The
+diagnosis pointed at a single fix: stop marching. The hybrid hands the long-range
+reach to harmonic — a *global* solve that fills the entire field in one shot,
+with no depth penalty — and restricts the GNN to a small, fixed number of local
+refinement passes (no depth to accumulate). This is the first approach to **beat
+harmonic infill**: it wins overall, fixes the deepest surface (the GNN improves
+even harmonic's 443k field), and *strengthens* the shallow-surface extrapolation
+it was always good at.
+
+**In one line:** the learned operator's value is real but depth-limited — hand
+the propagation to a classical global solver and keep the network to local
+refinement, and it beats both the classical baseline and its own rollout.
+
+---
+
 ## O1 — Per-iteration loss has a characteristic U-shape (curriculum effect)
 
 **Observed in:** Stage 5.5 (placeholder on anticline), Stage 6.3 (real
