@@ -2021,6 +2021,97 @@ rollout — not the operator, capacity, or init.
 
 ---
 
+## O22 — Residual penalty (λ_r=0.1) throttles the model and kills extrapolation
+
+**Observed in:** Phase-2 run, Stage 11.8 config but `loss.lambda_r=0.1` (100× the
+default), split_v2, seed=42, GPU. Eval: split_v2 val, 3 seeds, n_masks=10.
+
+### Result: worse overall, extrapolation edge destroyed
+
+Overall model 109.4 vs baseline 99.3 (harmonic 86.8). The best checkpoint came at
+**epoch 2** and never improved — the heavy residual penalty drove per-step Δz
+toward zero, so the model essentially stopped correcting and plateaued at once.
+Per-surface deficit (Δ = model − harmonic), vs baseline:
+
+| surface | N | baseline Δ | O22 Δ |
+|---|---|---|---|
+| TestHorizon4 | 11 | −26.6 | −0.1 |
+| TestHorizon7 | 11 | −21.5 | +4.6 |
+| 04BaseOligoMioceno | 69 | +41.2 | +27.6 |
+| 02TopoMioceno | 132 | +21.4 | +76.8 |
+
+The model's one strength — shallow-N extrapolation — is **gone** (TestHorizon4/7
+collapse from ~−24 to ~0). Extrapolation requires meaningful per-step
+corrections; penalising them removes exactly that, and the deepest surface is
+much worse (do-nothing leaves it near the mean-plane init).
+
+### Interpretation
+
+λ_r is a negative across its range: at the default it is effectively off, and
+cranked up it throttles the model into inaction. It suppresses the corrections
+the rollout needs rather than addressing depth accumulation. Not the lever.
+
+### Where the result lives
+
+- Checkpoint: `outputs/tensorboard/run_20260622_145038/best.pt` (best epoch 2).
+- Eval: `scripts/noise_band.py`, split_v2 val, seeds 1000–3000.
+
+---
+
+## O23 — Freeze-filled rollout (Phase 3c): the rollout's repeated updates are refinement, not drift
+
+**Observed in:** Phase-2 run, Stage 11.8 config but `rollout.method=freeze_filled`
+(a ring is locked once the frontier passes it, d < step), split_v2, seed=42, GPU.
+Eval: split_v2 val, 3 seeds, n_masks=10, with the same freeze rollout.
+
+### Result: worse on the deep surfaces, shallow wins preserved
+
+Overall model 103.1 vs baseline 99.3 (harmonic 86.8). Per-surface deficit
+(Δ = model − harmonic), vs baseline:
+
+| surface | N | baseline Δ | O23 Δ |
+|---|---|---|---|
+| TestHorizon4 | 11 | −26.6 | −24.9 |
+| TestHorizon7 | 11 | −21.5 | −18.9 |
+| 05_TopoCretaceo | 52 | +88.5 | +73.2 |
+| 04BaseOligoMioceno | 69 | +41.2 | +50.6 |
+| 02TopoMioceno | 132 | +21.4 | +60.5 |
+
+Freeze **preserves** the shallow-N extrapolation wins (those rings freeze early,
+and their first-pass estimate is already good on small surfaces) but is **worse
+on the deep surfaces** (443k +60.5 vs +21.4; 110k +50.6 vs +41.2) — the opposite
+of the (c) hypothesis.
+
+### Interpretation: refutes "re-drift is harmful"
+
+(c) assumed that re-updating an already-filled ring is harmful drift, so freezing
+would help, most of all deep. The data says the opposite: locking a ring at its
+first-pass (under-informed) estimate and forbidding further updates is **worse**,
+most on the deep surfaces. So the standard rollout's repeated updates are net
+**refinement** — as information propagates further from K, later passes improve
+the earlier rings, and that refinement is what large surfaces depend on. The
+bottleneck (O19) is not that filled rings drift; it is that the iterative
+refinement does not *converge well enough* over depth, and constraining it makes
+it worse.
+
+### Decision — Phase 3(c) rejected; what it implies
+
+(c) is rejected. With O22, both "constrain/stabilise the existing rollout" tweaks
+(freeze; throttle Δz) make things worse, because the rollout's iterative updates
+are beneficial, not harmful. Together with O18 (operator), O20 (capacity), O21
+(init), **every model-side and rollout-tweak intervention worsens the deepest
+surface; the plain baseline is the best the GNN does there.** This points away
+from tweaking the rollout and toward replacing its propagation mechanism — the
+Phase-3(a) hybrid (global solve + single-shot residual) or the future-work (b)
+multi-scale rollout.
+
+### Where the result lives
+
+- Checkpoint: `outputs/tensorboard/run_20260622_183336/best.pt` (best epoch 37).
+- Eval: `scripts/noise_band.py`, split_v2 val, seeds 1000–3000 (freeze rollout).
+
+---
+
 ## How to use this document
 
 Append new observations as `O<N>` entries when:
