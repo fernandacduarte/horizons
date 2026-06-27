@@ -58,7 +58,13 @@ with no depth penalty — and restricts the GNN to a small, fixed number of loca
 refinement passes (no depth to accumulate). This is the first approach to **beat
 harmonic infill**: it wins overall, fixes the deepest surface (the GNN improves
 even harmonic's 443k field), and *strengthens* the shallow-surface extrapolation
-it was always good at.
+it was always good at. The win is robust to the refinement count (O25) and the
+training seed, and it generalises to held-out data — beating harmonic
+out-of-distribution and on six of seven in-distribution test surfaces. The lone
+exception is informative: on one structurally unusual surface the learned
+correction degrades harmonic's good solution and flips the in-distribution
+aggregate — a tail risk that points to an obvious safeguard (bounding how far the
+correction may move the field from harmonic) and is the natural next step (O26).
 
 **In one line:** the learned operator's value is real but depth-limited — hand
 the propagation to a classical global solver and keep the network to local
@@ -2237,11 +2243,11 @@ Phase-2 rollout baseline, robustly across eval seeds.
 
 ### Caveats / next
 
-- **Single training seed.** The win is paired across 3 eval seeds (robust to
-  eval-mask noise) and the per-surface structure is mechanistically coherent, so
-  it is a solid directional result — but a 2nd/3rd training seed would firm up
-  the magnitude (the training-time val was noisy; best.pt was selected on a lucky
-  low draw, yet the multi-seed eval confirms the level).
+- **Confirmed across two training seeds.** seed 42 → 79.5 m and seed 43 → 79.1 m
+  (vs harmonic 86.8), each beating harmonic by ~7 m on all three eval seeds, each
+  pulling the 443k below zero (Δ −12.9 / −24.2) and keeping the shallow wins
+  (TestHorizon4 −40 / −45). The win is robust to the training lottery, not just
+  the eval lottery. And robust to K (O25). Seed-43 run: run_20260623_233916.
 - **05_TopoCretaceo still loses** (pathologically hard for both methods).
 - **Confirm on test_id / test_ood** before the final headline.
 - **n_passes fixed at 3** — a 1/3/5 sweep is the obvious follow-up now that there
@@ -2284,6 +2290,78 @@ already provided). K=3 is kept as the final configuration (nominal best).
 - K=1: `outputs/tensorboard/run_20260623_213059`; K=3 (O24):
   `run_20260623_115850`; K=5: `run_20260623_194150`. Eval via `noise_band.py`,
   split_v2 val, seeds 1000–3000.
+
+---
+
+## O26 — Test-set headline: hybrid wins OOD and on most surfaces, but a tail-risk outlier flips test_id
+
+**Observed in:** Final test-set evaluation of the O24 hybrid (seed 42,
+run_20260623_115850) on split_v2's held-out sets. `noise_band.py`, 5 seeds,
+n_masks=10, device=cuda.
+
+### test_ood (held-out R7 reservoir): clean win
+
+| method | mean (5 seeds) |
+|---|---|
+| harmonic | 58.3 |
+| **hybrid** | **51.1** |
+
+The hybrid beats harmonic by ~7 m and wins 4 of 5 surfaces (−6 to −15 m each;
+loses only Horizon5-OutSpace by +5). The best-of-both generalises to an entirely
+held-out reservoir group — the cross-distribution claim holds, at the same margin
+as val.
+
+### test_id: wins 6 of 7 surfaces, but one catastrophic outlier flips the aggregate
+
+| method | all 7 | ex-FUNDO_DO_MAR (6) |
+|---|---|---|
+| harmonic | 153.6 | 168.8 |
+| hybrid | 167.6 | **160.0** |
+
+Per-surface deficit (Δ = hybrid − harmonic):
+
+| surface | V | N | hybrid | harm | Δ |
+|---|---|---|---|---|---|
+| 07TopoCenomaniano | 165k | 87 | 302.5 | 339.2 | **−36.7** |
+| TestHorizon3 | 2.4k | 11 | 38.6 | 76.5 | **−38.0** |
+| 02_MCinza | 48k | 48 | 176.2 | 178.9 | −2.6 |
+| horizonte1-utm | 4.5k | 15 | 7.1 | 6.5 | +0.6 |
+| 01_FMar | 48k | 46 | 214.3 | 203.1 | +11.1 |
+| 06TopoCretaceoSuperior | 412k | 125 | 221.4 | 208.7 | +12.7 |
+| **FUNDO_DO_MAR** | **10k** | **54** | **212.9** | **62.3** | **+150.7** |
+
+The hybrid wins 6 of 7 test_id surfaces (incl. the large 165k by −37 and the
+small extrapolation by −38); excluding the outlier it leads 160.0 vs 168.8
+(~+9 m). But **FUNDO_DO_MAR alone (+150.7) flips the all-7 aggregate to a 14 m
+loss.**
+
+### The failure mode: the GNN refinement can degrade harmonic on outlier surfaces
+
+On FUNDO_DO_MAR the GNN turned harmonic's good 62 m solution into 213 m — it
+*added* 150 m of error. The surface is structurally unusual: N=54 on only 10k
+vertices, a far higher depth-to-size ratio than any train surface (their
+10k-vertex meshes had N≈20). The GNN's learned corrections do not generalise to
+that geometry and instead corrupt the harmonic field — the O21 "GNN degrades
+harmonic" risk, which the shallow rollout avoids on most surfaces but not all.
+This is a genuine tail risk: the hybrid is best on average and generalises
+(val +7, test_ood +7, 6/7 test_id +9), but is **not uniformly safe**.
+
+### Implications
+
+- **Headline, honestly stated:** the hybrid beats harmonic on val (+7), test_ood
+  (+7), and 6 of 7 test_id surfaces; the test_id aggregate is a loss only because
+  of one pathological surface. Best approach overall, with a characterised tail
+  risk.
+- **Mitigation (future work):** the failure is the correction moving z far from
+  harmonic. A bound on the deviation ‖z − z_harmonic‖ (a targeted cap, distinct
+  from the per-step λ_r of O22) would keep the small beneficial corrections while
+  preventing catastrophic degradation — a *safe* best-of-both. A trust/gating
+  mechanism (apply the correction only where confident) is the richer version.
+
+### Where the result lives
+
+- Checkpoint: run_20260623_115850 (O24 hybrid). Eval: `noise_band.py
+  --split test_id` / `--split test_ood`, 5 seeds, n_masks=10, device=cuda.
 
 ---
 

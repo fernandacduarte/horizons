@@ -1485,6 +1485,36 @@ normals `eps` (1e-12 → ~1e-6), bounding the normalization gradient at source.
 
 **Status:** In effect from Phase 2. Default-on (no flag); applies to every run.
 
+### D12.5 — Cross-phase test comparison: test_ood is the common ground
+
+**Decision:** When comparing the best model of each phase on held-out data, use
+**test_ood as the apples-to-apples metric** across all three phases, and report
+test_id only *within* a phase, never across phases.
+
+**Why:** the phases were trained and evaluated on different splits — Phase 1 on
+split_v1 (small surfaces only), Phases 2–3 on split_v2 (with the V>50k surfaces,
+D12.3). `build_phase2_split` derived split_v2 from split_v1 by distributing the
+large surfaces into **train / val / test_id only**, leaving **test_ood
+untouched**. So:
+- **test_ood is identical** in split_v1 and split_v2 — the same 5 R7
+  (`Horizon-OutSpace`) surfaces — so all three phase-best models are scored on
+  the same surfaces there. This is the valid cross-phase comparison and the row
+  to lead the 3-phase results table with.
+- **test_id differs**: split_v1's is 5 small surfaces; split_v2's is 7, including
+  the 165k and 412k. Phase-1 test_id and Phase-2/3 test_id are different sets and
+  must not be compared directly. test_id is a *within-regime* metric (Phase 1 on
+  small data; Phase 2 baseline vs Phase 3 hybrid on full data).
+
+Each `noise_band.py` run reads its own `split_file` from the run's config, so
+`--split test_id` / `test_ood` automatically resolve to the split that model was
+trained on — no override needed.
+
+**Where:** phase-best checkpoints — Phase 1 `run_20260614_155745` (split_v1,
+Stage 11.8), Phase 2 `run_20260621_171110` (split_v2, rollout baseline),
+Phase 3 `run_20260623_115850` (split_v2, hybrid; test results in O26).
+
+**Status:** Reporting convention for the writeup's 3-phase comparison.
+
 ---
 
 ## Future / open decisions
