@@ -33,7 +33,7 @@ def main() -> None:
                    default=[1000, 2000, 3000, 4000, 5000])
     p.add_argument("--device", default="cpu",
                    help="device for the model rollout (cpu | cuda); the "
-                        "harmonic baseline always runs on CPU (scipy)")
+                        "mean-plane and harmonic baselines always run on CPU")
     args = p.parse_args()
 
     # Read arch / data settings from the run's saved config snapshot
@@ -64,7 +64,8 @@ def main() -> None:
           f"{len(args.seeds)} mask-draw seeds, device={args.device}\n")
 
     regimes = ["half_plane", "outward_free", "outward_pinned"]
-    # Collect model overall + per-regime means, and harmonic overall, per seed
+    # Collect model overall + per-regime means, and the mean-plane and
+    # harmonic baseline overalls, per seed
     rows: list[dict] = []
     all_records: list = []  # every (surface, mask) record across seeds, for per-surface stats
     for seed in args.seeds:
@@ -82,12 +83,14 @@ def main() -> None:
         row = {
             "seed": seed,
             "model_overall": overall["model"]["mean"],
+            "meanplane_overall": overall["meanplane"]["mean"],
             "harmonic_overall": overall["harmonic"]["mean"],
         }
         for r in regimes:
             row[f"model_{r}"] = by_regime.get(r, {}).get("model", {}).get("mean", float("nan"))
         rows.append(row)
         print(f"  seed {seed}: model_overall={row['model_overall']:.2f}  "
+              f"meanplane_overall={row['meanplane_overall']:.2f}  "
               f"harmonic_overall={row['harmonic_overall']:.2f}")
 
     def spread(key: str) -> tuple[float, float, float, float]:
@@ -95,7 +98,7 @@ def main() -> None:
         return min(vals), max(vals), statistics.mean(vals), (statistics.stdev(vals) if len(vals) > 1 else 0.0)
 
     print("\n=== eval-mask spread across seeds (min / max / mean / std) ===")
-    for key in ["model_overall", "harmonic_overall",
+    for key in ["model_overall", "meanplane_overall", "harmonic_overall",
                 "model_half_plane", "model_outward_free", "model_outward_pinned"]:
         lo, hi, mu, sd = spread(key)
         print(f"  {key:<24} {lo:7.2f} / {hi:7.2f} / {mu:7.2f}  (std {sd:.2f}, range {hi-lo:.2f})")
@@ -105,16 +108,17 @@ def main() -> None:
     for r in all_records:
         by_surface.setdefault(r.surface_id, []).append(r)
     print("\n=== per-surface (mean over masks x seeds), largest first ===")
-    print(f"  {'surface':<26} {'V':>9} {'N':>5} {'model':>8} {'harm':>8} {'d(m-h)':>8}")
+    print(f"  {'surface':<26} {'V':>9} {'N':>5} {'model':>8} {'mplane':>8} {'harm':>8} {'d(m-h)':>8}")
     surf_rows = []
     for sid, recs in by_surface.items():
         V = recs[0].n_K + recs[0].n_U
         N = statistics.mean(r.N for r in recs)
         m = statistics.mean(r.rmse_model for r in recs)
+        mp = statistics.mean(r.rmse_meanplane for r in recs)
         h = statistics.mean(r.rmse_harmonic for r in recs)
-        surf_rows.append((V, N, sid, m, h))
-    for V, N, sid, m, h in sorted(surf_rows, reverse=True):
-        print(f"  {sid:<26} {V:>9,} {N:>5.0f} {m:>8.1f} {h:>8.1f} {m - h:>+8.1f}")
+        surf_rows.append((V, N, sid, m, mp, h))
+    for V, N, sid, m, mp, h in sorted(surf_rows, reverse=True):
+        print(f"  {sid:<26} {V:>9,} {N:>5.0f} {m:>8.1f} {mp:>8.1f} {h:>8.1f} {m - h:>+8.1f}")
 
 
 if __name__ == "__main__":
