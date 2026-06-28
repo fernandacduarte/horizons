@@ -66,9 +66,12 @@ correction degrades harmonic's good solution and flips the in-distribution
 aggregate — a tail risk that points to an obvious safeguard (bounding how far the
 correction may move the field from harmonic) and is the natural next step (O26).
 
-**In one line:** the learned operator's value is real but depth-limited — hand
-the propagation to a classical global solver and keep the network to local
-refinement, and it beats both the classical baseline and its own rollout.
+**In one line:** the learned operator is an excellent small-surface extrapolator
+that collapses as the rollout deepens; replacing the deep rollout with a
+classical global solve plus shallow GNN refinement (the hybrid) rescues the
+large-surface regime and beats harmonic there — at the cost of small-surface
+quality. There is no single best model: the rollout wins small, the hybrid wins
+large, and the harmonic backbone is the hinge between them (O27).
 
 ---
 
@@ -2230,9 +2233,14 @@ works.
 
 ### Decision
 
-`approach=hybrid` is the **best model of the study** and the recommended
-configuration for the large-surface regime: it beats harmonic infill and the
-Phase-2 rollout baseline, robustly across eval seeds.
+`approach=hybrid` is the best model **for the large-surface / full-size-range
+regime**: on split_v2 (mixed sizes) it beats harmonic infill and the Phase-2
+rollout baseline, robustly across eval seeds and refinement count (O25). It is
+**not** universally best — on pure small-surface extrapolation the standard
+rollout is far better (O27), because the harmonic backbone that rescues large
+surfaces handicaps small-surface extrapolation. No single model dominates across
+regimes; the hybrid is the safe general-purpose choice (it never collapses on
+large surfaces, which the rollout does).
 
 ### Where the result lives
 
@@ -2362,6 +2370,68 @@ This is a genuine tail risk: the hybrid is best on average and generalises
 
 - Checkpoint: run_20260623_115850 (O24 hybrid). Eval: `noise_band.py
   --split test_id` / `--split test_ood`, 5 seeds, n_masks=10, device=cuda.
+
+---
+
+## O27 — Final three-phase test comparison: no single best model; the regime decides
+
+**Observed in:** the three phase-best models scored on the held-out test sets,
+per the D12.5 convention (test_ood = the common ground, the same 5 R7 surfaces
+for all three; test_id is within-regime only). `noise_band.py`, 5 seeds,
+n_masks=10.
+
+### test_ood (R7, small extrapolation — the apples-to-apples cross-phase metric)
+
+| model | test_ood RMSE | vs harmonic |
+|---|---|---|
+| Phase 2 — full-data rollout (run_20260621_171110) | **7.8** | −50.5 |
+| Phase 1 — small-data rollout / 11.8 (run_20260614_155745) | 22.0 | −36.3 |
+| Phase 3 — hybrid (run_20260623_115850) | 51.1 | −7.2 |
+| harmonic infill | 58.3 | — |
+
+On pure small-surface extrapolation **the standard rollout is by far the best**,
+and the full-data rollout (7.8 m) beats the small-data one (22 m) — the large
+surfaces in training even *helped* its small-surface extrapolation. The **hybrid
+is the worst of the three GNN models here (51 m)**: its harmonic backbone is a
+smooth field that suppresses the trends extrapolation needs, dragging it toward
+harmonic (58 m). All three GNNs still beat harmonic, but the harmonic-backbone
+handicap is unmistakable.
+
+### Large-surface regime (split_v2 test_id — Phase 2 vs Phase 3, same split)
+
+| model | test_id RMSE |
+|---|---|
+| harmonic | 153.6 |
+| Phase 3 — hybrid | 167.6 (160.0 ex-FUNDO_DO_MAR) |
+| Phase 2 — full-data rollout | 253.4 |
+
+On surfaces that include the 165k/412k, **the rollout collapses (253 m)** — the
+depth crossover (O19) in full force — while the **hybrid (167.6, or 160.0 without
+the FUNDO_DO_MAR outlier) is far better and beats harmonic on 6 of 7 surfaces**
+(O26).
+
+### Conclusion: regime-dependent, governed by the harmonic backbone
+
+The three approaches are three points on one trade-off:
+- **Small-surface extrapolation → the standard rollout** (7.8 m, 7.5× better than
+  harmonic). Its mean-plane start lets it follow trends the hybrid's harmonic
+  start suppresses.
+- **Large / full size range → the hybrid.** It is the only approach that does not
+  collapse on large surfaces (depth), and it beats harmonic there.
+
+So the study's contribution is **not** "one model beats everything." It is (a) the
+**depth-crossover diagnosis** — the rollout is an excellent small-surface
+extrapolator that fails on large — and (b) the **hybrid as the fix that makes the
+GNN viable across the full size range**, at the cost of small-surface
+extrapolation. Practically: use the rollout where surfaces are small, the hybrid
+where they are large (or include large), the latter being the safe general-
+purpose choice that never collapses.
+
+### Where the result lives
+
+- Runs: Phase 1 run_20260614_155745, Phase 2 run_20260621_171110, Phase 3
+  run_20260623_115850. Eval `noise_band.py --split test_id / test_ood`, 5 seeds.
+  Comparison convention: D12.5.
 
 ---
 
