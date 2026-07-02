@@ -2,7 +2,7 @@
 
 Same machinery as scripts/overfit_one.py, but loads from data/surfaces/.
 Use this to confirm that the full pipeline works end-to-end on the actual
-dataset before launching Stage 8's training loop.
+dataset before launching the training loop.
 
 Usage:
     python scripts/overfit_real.py                          # default surface
@@ -69,7 +69,7 @@ def main(cfg: DictConfig) -> None:
     mask = mask.to(device)
     d = d.to(device)
 
-    # Per-surface z normalization (D4.6): center z by the mean of z[K]
+    # Per-surface z normalization: center z by the mean of z[K]
     # so the model sees relative depths instead of absolute geological depths.
     z_mean = z_true[mask].mean()
     z_true_norm = z_true - z_mean

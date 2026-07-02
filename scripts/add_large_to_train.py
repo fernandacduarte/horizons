@@ -1,10 +1,10 @@
 """Add all large (V > threshold) surfaces in data/surfaces/ to the TRAIN
 split, leaving val / test_id / test_ood untouched.
 
-For the data-diversity experiment (O19): bring back the V>50k surfaces
-excluded at Stage 4 (D4.2), now trainable thanks to gradient checkpointing
-(D12.2). Adding them to TRAIN only — same 7-surface val — keeps the
-comparison to the 30-surface baseline and the O16 noise floor clean.
+For the data-diversity experiment: bring back the V>50k surfaces that were
+excluded by the size filter, now trainable thanks to gradient checkpointing.
+Adding them to TRAIN only — same 7-surface val — keeps the comparison to the
+30-surface baseline and the noise floor clean.
 (Do NOT use build_split.py for this: it re-stratifies everything and would
 reshuffle the val set, breaking comparability.)
 

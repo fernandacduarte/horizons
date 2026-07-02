@@ -1,12 +1,12 @@
 """Convert GOCAD .ts files to .npz + reservoir/group metadata.
 
-Applies filters from DECISIONS.md (D4.2):
+Applies the following filters:
   - Drop V < 500 (degenerate)
   - Drop V > 50,000 (computationally unwieldy)
   - Drop Euler ≠ 1 (non-manifold)
-Applies z-sign normalization from D4.3:
+Applies z-sign normalization:
   - Flip z if entirely negative, so output is uniformly depth-positive.
-Classifies each kept file into one of 8 filename-pattern groups (D4.4).
+Classifies each kept file into one of 8 filename-pattern groups.
 
 Outputs:
   data/surfaces/<surface_id>.npz   - one per kept file
@@ -29,7 +29,7 @@ from horizons.data.mesh import HorizonSurface
 def classify_reservoir(filename: str) -> str:
     """Classify a .ts filename into one of 8 reservoir groups.
 
-    See DECISIONS.md D4.4 for the rationale. The order of checks matters
+    The order of checks matters
     because some patterns are subsets of others.
     """
     name = filename[:-3] if filename.endswith(".ts") else filename
@@ -128,7 +128,7 @@ def main() -> None:
                 dropped.append(record)
                 continue
 
-            # z-sign normalization (D4.3)
+            # z-sign normalization
             V_np = surf.V.numpy().astype(np.float64)
             F_np = surf.F.numpy()
             z = V_np[:, 2]

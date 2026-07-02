@@ -1,8 +1,5 @@
 """Train horizon-extrapolation model on the canonical dataset split.
 
-Stage 8.3 scope: bare skeleton training. No LR scheduling, no
-checkpointing yet.
-
 Usage:
     python scripts/train.py                           # use config defaults
     python scripts/train.py train.n_epochs=20         # override epochs

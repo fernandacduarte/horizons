@@ -2,11 +2,10 @@
 train / val / test_id, ADDING them to the existing split (current members
 preserved).
 
-Recreates and extends the O15 "smart split": large surfaces present in val
-and test_id (not just train), so the data-diversity hypothesis (does adding
-the V>50k surfaces help?) can be tested on a val that actually contains large
-surfaces. Unlike O15 — whose split lived only on the container and was lost —
-this is deterministic (seeded) and writes the split file, so commit it.
+Places large surfaces in val and test_id (not just train), so the
+data-diversity hypothesis (does adding the V>50k surfaces help?) can be tested
+on a val that actually contains large surfaces. Deterministic (seeded); writes
+the split file.
 
 Run AFTER rebuilding with the size filter relaxed (capped to exclude the
 two >600k giants for tractable epoch time):

@@ -24,7 +24,7 @@ def _make_rng(
     """Deterministic RNG: same (surface_id, epoch, split, mask_idx) -> same mask.
 
     The mask_idx field exists so we can sample multiple distinct masks
-    per surface per epoch (mask augmentation, Stage 11.8 / Candidate 3).
+    per surface per epoch (mask augmentation).
     With n_masks_per_epoch=1 (default), mask_idx is always 0 and the
     behavior is identical to before. With n_masks_per_epoch=N>1, mask_idx
     ranges from 0 to N-1 and each yields a different mask.
@@ -61,7 +61,7 @@ class HorizonDataset(Dataset):
         Whether to apply per-surface centering of (x, y, z) to the
         coordinates returned by __getitem__. x, y centered by all-vertex
         mean; z centered by the mean over known vertices (using z[U]
-        would leak ground truth). See D4.6. Default True; set False for
+        would leak ground truth). Default True; set False for
         tests that compare against uncentered fixtures.
     normalize_per_surface : bool, default False
         Whether to additionally scale (x, y, z) so that the centered
@@ -143,7 +143,7 @@ class HorizonDataset(Dataset):
 
         mask, d, regime = self.mask_sampler.sample(surface, rng)
 
-        # Per-surface centering (resolves D4.6).
+        # Per-surface centering.
         # x, y can use all vertices since they're fully observed.
         # z MUST use only z[K] — using z[U] would leak ground truth into
         # the input the model sees.
@@ -158,7 +158,7 @@ class HorizonDataset(Dataset):
             xy_mean = torch.zeros(2, dtype=surface.V.dtype)
             z_mean = surface.V.new_zeros(())
 
-        # Per-surface normalization (Candidate 9, Stage 11.6).
+        # Per-surface normalization.
         # Scale all coordinates so the centered data lies in roughly
         # [-1, +1]. The xy_scale uses ALL vertices since x, y are known.
         # The z_scale uses ONLY z[K] to maintain the no-leakage invariant.
@@ -246,7 +246,7 @@ def load_split_dataset(
 
     Loads from data/surfaces/ and data/splits/split_v1.json (produced by
     scripts/build_dataset.py and scripts/build_split.py respectively).
-    Applies per-surface centering by default — see D4.6.
+    Applies per-surface centering by default.
     """
     from horizons.data.loaders import load_split as _load_split
     surfaces = _load_split(

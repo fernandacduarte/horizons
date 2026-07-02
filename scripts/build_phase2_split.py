@@ -2,18 +2,14 @@
 eight V>50k, V<=600k surfaces, placed by hand to balance mesh magnitude across
 train / val / test_id (each set gets one ~400k+ surface and some moderate ones).
 
-Phase 1 = small data (V<=48k), 11.8 the best model. Phase 2 restarts the study
-on this fuller, magnitude-balanced split, now that gradient checkpointing
-(D12.2) removed the memory wall. The placement is explicit (not seeded) so the
-split is reproducible and auditable — fixing O15's "lost split" mistake. It
-reads the Phase-1 split (split_v1.json, left untouched) as the small-surface
-base and writes a NEW split_v2.json. Commit the result.
+The placement is explicit (not seeded) so the split is reproducible and
+auditable. It reads the small-surface split (split_v1.json, left untouched) as
+the base and writes a NEW split_v2.json.
 
 Run AFTER building the large surfaces:
     HORIZONS_TS_DIR=/path/to/ts python scripts/build_dataset.py --max-vertices 600000
     python scripts/build_phase2_split.py --dry-run
     python scripts/build_phase2_split.py
-    git add data/splits/split_v2.json && git commit -m "O19: Phase-2 split (split_v2)"
 """
 from __future__ import annotations
 

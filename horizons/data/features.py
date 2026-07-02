@@ -2,7 +2,7 @@
 
 Both functions are pure PyTorch tensor operations, fully differentiable
 in their inputs. They are designed to be called every rollout iteration
-(Stage 6) with autograd tracking through them.
+with autograd tracking through them.
 """
 from __future__ import annotations
 

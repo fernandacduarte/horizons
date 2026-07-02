@@ -8,7 +8,7 @@ Three terms (all defined per-iteration t and summed over the rollout):
   - residual regularizer: penalizes squared Δz^{t-1} on U, weighted by
     lambda_r. Defends against unstable large per-iteration corrections.
 
-All three terms use MEAN rather than SUM (see D5.7 in DECISIONS.md).
+All three terms use MEAN rather than SUM.
 """
 from __future__ import annotations
 
@@ -233,7 +233,7 @@ def hybrid_rollout_loss(
     return {"total": total, "data": total, "curv": zero.clone(), "res": zero.clone()}
     
 # ======================================================================
-# Backwards-compat alias: keep rollout_data_loss for Stage 5/6 tests
+# Backwards-compat alias: data-only rollout loss kept for the overfit tests
 # ======================================================================
 def rollout_data_loss(
     z_trajectory: list[torch.Tensor],
@@ -243,9 +243,9 @@ def rollout_data_loss(
     lambda_p: float = 0.1,
     rollout_weights: list[float] | None = None,
 ) -> torch.Tensor:
-    """Data-only rollout loss (no regularizers). Used by Stage 5's overfit
-    test and the keystone regression guard; the full rollout_loss is the
-    real training objective from Stage 7 onward."""
+    """Data-only rollout loss (no regularizers). Used by the overfit test
+    and the regression guard; the full rollout_loss is the real training
+    objective."""
     N = len(z_trajectory) - 1
     if N < 1:
         raise ValueError("z_trajectory must contain at least z^0 and z^1")

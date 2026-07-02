@@ -174,7 +174,7 @@ class TestEpochResampling:
 
 
 class TestCentering:
-    """Tests for per-surface (x, y, z) centering (D4.6)."""
+    """Tests for per-surface (x, y, z) centering."""
 
     @pytest.fixture
     def utm_like_surfaces(self) -> list[HorizonSurface]:

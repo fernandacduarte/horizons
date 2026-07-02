@@ -172,7 +172,7 @@ def main(cfg: DictConfig) -> None:
                       f"{surface.surface_id} | {regime} | N={N}")
     axes[0].grid(True, which="both", linewidth=0.3)
 
-    # Panel 2: per-iteration L_t (data only, for comparability with Stage 6)
+    # Panel 2: per-iteration L_t (data only)
     cmap = plt.cm.viridis
     for t in range(1, N + 1):
         color = cmap(t / N)

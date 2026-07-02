@@ -6,8 +6,8 @@ n_masks=10). Update DATA if reruns.
 
     python scripts/plot_crossover.py
 writes, in outputs/evaluation/plots/:
-    phase2_crossover.png          (O19, baseline crossover)
-    phase2_crossover_compare.png  (deficit vs N, baseline + O20–O23)
+    phase2_crossover.png          (baseline crossover)
+    phase2_crossover_compare.png  (deficit vs N, baseline + interventions)
     phase2_deep_bar.png           (443k-surface deficit across all runs)
     phase2_hybrid.png             (baseline vs hybrid, deficit vs N)
 """
@@ -19,7 +19,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# surface, N, deficit: baseline | O20 cap | O21 harm-init | O22 lambda_r | O23 freeze | O24 hybrid
+# surface, N, deficit: baseline | capacity | harmonic-init | lambda_r | freeze | hybrid
 DATA = [
     ("TestHorizon4", 11, -26.6, -22.8, -7.9, -0.1, -24.9, -40.1),
     ("TestHorizon7", 11, -21.5, -18.7, -10.4, 4.6, -18.9, -42.8),
@@ -33,10 +33,10 @@ DATA = [
 ]
 RUNS = [  # label, column index into DATA, colour, marker  (rollout-family runs)
     ("baseline (h=64)", 2, "#378ADD", "o"),
-    ("O20 capacity", 3, "#BA7517", "s"),
-    ("O21 harmonic-init", 4, "#D85A30", "^"),
-    ("O22 lambda_r", 5, "#534AB7", "D"),
-    ("O23 freeze-filled", 6, "#0F6E56", "v"),
+    ("capacity", 3, "#BA7517", "s"),
+    ("harmonic-init", 4, "#D85A30", "^"),
+    ("lambda_r", 5, "#534AB7", "D"),
+    ("freeze-filled", 6, "#0F6E56", "v"),
 ]
 WIN, LOSE = "#1D9E75", "#D85A30"
 OUT = Path("outputs/evaluation/plots")
@@ -80,8 +80,8 @@ def compare_figure() -> None:
 
 def deep_bar() -> None:
     deep = next(r for r in DATA if r[0] == "02TopoMioceno")
-    cols = [("baseline", 2), ("O20 cap", 3), ("O21 h-init", 4), ("O22 λ_r", 5),
-            ("O23 freeze", 6), ("O24 hybrid", 7)]
+    cols = [("baseline", 2), ("capacity", 3), ("harm-init", 4), ("λ_r", 5),
+            ("freeze", 6), ("hybrid", 7)]
     vals = [deep[c] for _, c in cols]
     labels = [lbl for lbl, _ in cols]
     colors = ["#378ADD", "#D85A30", "#D85A30", "#D85A30", "#D85A30", WIN]
@@ -102,7 +102,7 @@ def hybrid_figure() -> None:
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.axhline(0, color="0.5", ls="--", lw=1)
     ax.scatter(Ns, [r[2] for r in rows], s=60, color="#378ADD", label="baseline rollout", zorder=3)
-    ax.scatter(Ns, [r[7] for r in rows], s=70, marker="^", color=WIN, label="hybrid (O24)", zorder=3)
+    ax.scatter(Ns, [r[7] for r in rows], s=70, marker="^", color=WIN, label="hybrid", zorder=3)
     ax.set_xlabel("rollout depth  N")
     ax.set_ylabel("RMSE deficit:  model − harmonic  (m)   (below 0 = beats harmonic)")
     ax.set_title("Hybrid bends the deep end below zero and keeps the shallow wins")

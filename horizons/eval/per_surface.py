@@ -1,6 +1,6 @@
 """Per-surface evaluation: rollout + RMSE breakdown by topological ring.
 
-This is the workhorse of Stage 10. Given a trained model and a single
+This is the evaluation workhorse. Given a trained model and a single
 surface (with its mask + topological distance), it runs the rollout
 and returns a structured result with:
   - overall RMSE on U
@@ -93,7 +93,7 @@ def evaluate_surface(
         runs, use the same seed.
     center_per_surface : bool
         Whether to apply (x, y, z) per-surface centering before feeding
-        to the model (matches D4.6 / Stage 8.1).
+        to the model.
     device : str | torch.device
 
     Returns
