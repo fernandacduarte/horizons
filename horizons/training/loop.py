@@ -231,7 +231,7 @@ def train(
                 edge_index = item["edge_index"].to(device)
                 mask = item["mask"].to(device)
                 d = item["d"].to(device)
-                                # hybrid: harmonic-filled init, refined by a fixed shallow number
+                # hybrid: harmonic-filled init, refined by a fixed shallow number
                 # of passes (no surface-depth march), supervised by all-U MSE.
                 # rollout: the standard surface-depth rollout + per-ring loss.
                 N = hybrid_n_passes if approach == "hybrid" else item["N"]

@@ -47,7 +47,7 @@ def baseline_figure() -> None:
     ax.axhline(0, color="0.5", ls="--", lw=1)
     for name, N, d, *_ in DATA:
         win = d < 0
-        ax.scatter(N, d, s=80, marker="^" if win else "o", color=WIN if win else LOSE,
+        ax.scatter(N, d, s=80, marker="o", color=WIN if win else LOSE,
                    zorder=3, edgecolors="white", linewidths=0.5)
         ax.annotate(name, (N, d), xytext=(7, 0), textcoords="offset points",
                     va="center", fontsize=8, color="0.35")
@@ -113,12 +113,84 @@ def hybrid_figure() -> None:
     print(f"wrote {OUT / 'phase2_hybrid.png'}")
 
 
+def results_figure() -> None:
+    """Two-panel test RMSE with the mean-plane baseline: test_ood and test_id."""
+    MP, ROLL, HYB, HARM = "#888780", "#378ADD", WIN, "#BA7517"
+    ood = [("Mean-plane", 0.0, MP), ("Rollout", 7.8, ROLL),
+           ("Hybrid", 51.1, HYB), ("Harmonic", 58.3, HARM)]
+    idd = [("Harmonic", 153.6, HARM), ("Hybrid", 167.6, HYB),
+           ("Mean-plane", 232.4, MP), ("Rollout", 253.4, ROLL)]
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 4.5))
+    for ax, data, title in [(a1, ood, "test_ood"), (a2, idd, "test_id")]:
+        ax.bar([d[0] for d in data], [d[1] for d in data], color=[d[2] for d in data])
+        for i, d in enumerate(data):
+            ax.text(i, d[1], f"{d[1]:.1f}", ha="center", va="bottom", fontsize=9)
+        ax.set_title(title)
+        ax.set_ylabel("RMSE (m) — lower better")
+        ax.tick_params(axis="x", labelrotation=12)
+    fig.tight_layout()
+    fig.savefig(OUT / "phase_results.png", dpi=150)
+    print(f"wrote {OUT / 'phase_results.png'}")
+
+
+def hybrid_vs_harmonic_figure() -> None:
+    """Diverging per-surface deficit (hybrid − harmonic) on test_id."""
+    rows = [("TestHorizon3", -38.0), ("07TopoCenomaniano", -36.7), ("02_MCinza", -2.6),
+            ("horizonte1-utm", 0.6), ("01_FMar", 11.1),
+            ("06TopoCretaceoSuperior", 12.7), ("FUNDO_DO_MAR", 150.7)]
+    names = [r[0] for r in rows]
+    vals = [r[1] for r in rows]
+    colors = [WIN if v < 0 else LOSE for v in vals]
+    y = list(range(len(rows)))
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    ax.barh(y, vals, color=colors, zorder=3)
+    ax.axvline(0, color="0.4", lw=1)
+    ax.set_yticks(y)
+    ax.set_yticklabels(names, fontsize=9)
+    ax.invert_yaxis()                       # first row (best) at top
+    ax.set_xlim(-62, 182)                   # padding so value labels never overflow
+    ax.set_xlabel("← hybrid wins            harmonic wins →")
+    ax.set_title("Hybrid − Harmonic RMSE per test_id surface (m)")
+    for yi, v in zip(y, vals):
+        ha = "right" if v < 0 else "left"
+        ax.text(v + (-3 if v < 0 else 3), yi, f"{'+' if v > 0 else ''}{v:.1f}",
+                va="center", ha=ha, fontsize=9)
+    fig.tight_layout()
+    fig.savefig(OUT / "hybrid_vs_harmonic.png", dpi=150)
+    print(f"wrote {OUT / 'hybrid_vs_harmonic.png'}")
+
+
+def test_id_vertices_table() -> None:
+    """Simple 2-column table (white background): test_id surface + vertex count."""
+    rows = [("06TopoCretaceoSuperior", 412260), ("07TopoCenomaniano", 165265),
+            ("02_MCinza", 48000), ("01_FMar", 48000), ("FUNDO_DO_MAR", 9976),
+            ("horizonte1-utm", 4464), ("TestHorizon3", 2436)]
+    fig, ax = plt.subplots(figsize=(5.4, 3.2))
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis("off")
+    ax.text(0.03, 0.93, "Surface", fontsize=12, fontweight="bold", ha="left", va="center")
+    ax.text(0.97, 0.93, "Vertices", fontsize=12, fontweight="bold", ha="right", va="center")
+    ax.plot([0.02, 0.98], [0.87, 0.87], color="#333333", lw=1.3)
+    for i, (name, v) in enumerate(rows):
+        y = 0.78 - i * 0.11
+        ax.text(0.03, y, name, fontsize=11, ha="left", va="center")
+        ax.text(0.97, y, f"{v:,}", fontsize=11, ha="right", va="center")
+        ax.plot([0.02, 0.98], [y - 0.055, y - 0.055], color="#e5e5e5", lw=0.7)
+    fig.savefig(OUT / "test_id_vertices.png", dpi=200, facecolor="white",
+                bbox_inches="tight")
+    print(f"wrote {OUT / 'test_id_vertices.png'}")
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     baseline_figure()
     compare_figure()
     deep_bar()
     hybrid_figure()
+    results_figure()
+    hybrid_vs_harmonic_figure()
+    test_id_vertices_table()
 
 
 if __name__ == "__main__":
