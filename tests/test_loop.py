@@ -1,6 +1,6 @@
 """Tests for the training loop, focused on the non-finite-gradient guard.
 
-Regression for the Phase-2 epoch-91 failure: a *finite* loss back-propagated a
+Regression for a training failure where a *finite* loss back-propagated a
 *non-finite* gradient (the 1/||n|| term in vertex-normal normalization on a
 near-degenerate normal during a deep rollout). clip_grad_norm_ cannot sanitize
 NaN/Inf (clipping by a NaN norm yields NaN grads), so the poisoned gradient
@@ -62,7 +62,7 @@ def test_nonfinite_gradient_guard_preserves_weights():
     """A finite loss that back-props a NaN gradient must NOT corrupt the weights:
     the optimizer step is skipped and parameters stay finite. Without the guard
     the NaN gradient would flow through clip_grad_norm_ into optimizer.step()
-    and poison the weights — the Phase-2 epoch-91 failure mode."""
+    and poison the weights."""
     train_ds, val_ds = _fixture_datasets()
     model = _NaNGradOnFirstCall()
 

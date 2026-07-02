@@ -1,4 +1,4 @@
-"""Tests for the hybrid approach (Phase 3a): harmonic init + fixed-K GNN refine."""
+"""Tests for the hybrid approach: harmonic init + fixed-K GNN refine."""
 from __future__ import annotations
 
 from pathlib import Path
