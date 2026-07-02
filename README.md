@@ -71,6 +71,47 @@ print(f'epoch: {ckpt.epoch}, best_val_loss: {ckpt.best_val_loss:.2f}')
 "
 ```
 
+## Visualization
+
+Three PyVista scripts render 3-D views of a run's predictions and of the mask
+regimes. All accept `--surface <id>` (or `--index <i>` for the i-th surface) and
+`--list` to print the surfaces in a split. The two prediction scripts take a run
+directory and an optional `--out fig.png` to save a PNG off-screen instead of
+opening an interactive window; `--show-edges` overlays the triangle mesh edges.
+
+### Prediction vs. ground truth
+Three linked panels — the masked input, the network's extrapolation, and the
+ground-truth surface (blue = K known, orange = U extrapolated):
+```bash
+python scripts/viz_prediction.py outputs/tensorboard/run_<TIMESTAMP> --surface TestHorizon4
+python scripts/viz_prediction.py outputs/tensorboard/run_<TIMESTAMP> --split test_ood --index 0
+python scripts/viz_prediction.py outputs/tensorboard/run_<TIMESTAMP> --surface TestHorizon4 --show-edges
+python scripts/viz_prediction.py outputs/tensorboard/run_<TIMESTAMP> --surface TestHorizon4 --out fig.png
+```
+
+### Prediction with an error map
+Same first two panels, but the third replaces the ground truth with a per-node
+error map on the predicted surface (signed `prediction − truth`, in metres). The
+known K region is ~0 by construction, so the colour concentrates where the model
+actually extrapolated:
+```bash
+python scripts/viz_prediction_with_error.py outputs/tensorboard/run_<TIMESTAMP> --surface TestHorizon4
+python scripts/viz_prediction_with_error.py outputs/tensorboard/run_<TIMESTAMP> --surface TestHorizon4 --abs-error
+```
+`--abs-error` colours by `|error|` (sequential map) instead of signed error
+(diverging map). `--show-edges` and `--out fig.png` work here too.
+
+### Mask regimes
+One PNG per masking regime (`half_plane`, `outward_free`, `outward_pinned`) on a
+single surface, coloured blue = K / orange = U. No trained run is needed:
+```bash
+python scripts/viz_mask_regimes.py                            # val split, first surface
+python scripts/viz_mask_regimes.py --surface TestHorizon4 --out-dir figures/masks
+python scripts/viz_mask_regimes.py --top-down                 # straight-down view (clearest mask shape)
+```
+Writes `mask_half_plane.png`, `mask_outward_free.png`, and
+`mask_outward_pinned.png` to `--out-dir` (default `figures/masks`).
+
 ## Building the dataset (one-time)
 
 ```bash

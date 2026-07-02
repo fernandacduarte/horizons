@@ -1513,7 +1513,39 @@ trained on — no override needed.
 Stage 11.8), Phase 2 `run_20260621_171110` (split_v2, rollout baseline),
 Phase 3 `run_20260623_115850` (split_v2, hybrid; test results in O26).
 
-**Status:** Reporting convention for the writeup's 3-phase comparison.
+**Status:** Superseded by D12.6 — Phase 1 is no longer reported and test_ood is
+excluded as a planar benchmark, so the cross-phase common-ground rationale is moot.
+
+---
+
+### D12.6 — Add a mean-plane baseline; exclude test_ood as a planar benchmark
+
+**Decision:** Report a trivial **mean-plane** baseline (least-squares plane through
+K) alongside the model and harmonic, and **drop test_ood from the headline
+results** as an uninformative (planar) benchmark. Lead the evaluation with the
+structured held-out set, test_id.
+
+**Why:** the mean-plane baseline does two jobs.
+- **Sanity floor.** It is the trivial "no structure" prediction; a learned method
+  must beat it to justify itself. On structured test_id the hybrid does (168 vs
+  mean-plane 232) while the pure rollout does *not* (253 — worse than a flat
+  plane), which sharpens the depth-collapse story (O28).
+- **Planarity detector.** It reconstructs every test_ood (R7) surface to **0.01 m**
+  — they are essentially tilted planes. Planar extrapolation is solved exactly by a
+  plane fit and does not test structured reconstruction, so test_ood is
+  uninformative. Excluding it on the objective, result-independent criterion of
+  planarity (not because a result was unflattering), stated openly, is rigour, not
+  cherry-picking. By contrast test_id surfaces deviate 6–249 m from any plane
+  (`scripts/viz_planarity.py`).
+
+This retires the D12.5 cross-phase convention: Phase 1 is now cited only as the
+small-data start of the study, and test_ood — D12.5's "common ground" — is excluded.
+
+**Where:** `noise_band.py` (meanplane column); `scripts/viz_planarity.py`
+(`test_ood_planar.png`, `test_id_structured.png`); `phase_results.png` rebuilt as a
+single test_id 4-bar chart. Full numbers in O28.
+
+**Status:** Reporting convention for the writeup / presentation results.
 
 ---
 

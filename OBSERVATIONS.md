@@ -59,19 +59,19 @@ refinement passes (no depth to accumulate). This is the first approach to **beat
 harmonic infill**: it wins overall, fixes the deepest surface (the GNN improves
 even harmonic's 443k field), and *strengthens* the shallow-surface extrapolation
 it was always good at. The win is robust to the refinement count (O25) and the
-training seed, and it generalises to held-out data — beating harmonic
-out-of-distribution and on six of seven in-distribution test surfaces. The lone
+training seed, and it generalises to held-out data — beating harmonic on six of
+seven held-out (in-distribution) test surfaces. The lone
 exception is informative: on one structurally unusual surface the learned
 correction degrades harmonic's good solution and flips the in-distribution
 aggregate — a tail risk that points to an obvious safeguard (bounding how far the
 correction may move the field from harmonic) and is the natural next step (O26).
 
-**In one line:** the learned operator is an excellent small-surface extrapolator
-that collapses as the rollout deepens; replacing the deep rollout with a
-classical global solve plus shallow GNN refinement (the hybrid) rescues the
-large-surface regime and beats harmonic there — at the cost of small-surface
-quality. There is no single best model: the rollout wins small, the hybrid wins
-large, and the harmonic backbone is the hinge between them (O27).
+**In one line:** the learned operator collapses as the rollout deepens — on large
+surfaces it is worse than a trivial flat-plane fit; replacing the deep rollout with
+a classical global solve plus shallow GNN refinement (the hybrid) makes it the best
+*learned* model on structured surfaces, beating both trivial baselines and matching
+harmonic infill (O28). Its one failure mode — degrading harmonic on a structurally
+unusual surface — is the natural next target (O26).
 
 ---
 
@@ -2233,14 +2233,14 @@ works.
 
 ### Decision
 
-`approach=hybrid` is the best model **for the large-surface / full-size-range
-regime**: on split_v2 (mixed sizes) it beats harmonic infill and the Phase-2
-rollout baseline, robustly across eval seeds and refinement count (O25). It is
-**not** universally best — on pure small-surface extrapolation the standard
-rollout is far better (O27), because the harmonic backbone that rescues large
-surfaces handicaps small-surface extrapolation. No single model dominates across
-regimes; the hybrid is the safe general-purpose choice (it never collapses on
-large surfaces, which the rollout does).
+`approach=hybrid` is the best **learned** model on the structured surfaces that
+actually test reconstruction. On split_v2 val it beats harmonic infill (79.5 vs
+86.8) and the Phase-2 rollout, robustly across eval seeds and refinement count
+(O25); on held-out test_id it is the best learned model (168 m), beating both
+trivial baselines (mean-plane 232, rollout 253) and matching harmonic (154 — it
+wins once the FUNDO_DO_MAR outlier is removed, O26). The pure rollout collapses on
+large surfaces — worse than a flat plane. (The earlier "rollout wins small-surface
+extrapolation" caveat was an artifact of a planar test set, now excluded; see O28.)
 
 ### Where the result lives
 
@@ -2309,6 +2309,12 @@ n_masks=10, device=cuda.
 
 ### test_ood (held-out R7 reservoir): clean win
 
+> **Caveat (O28):** test_ood was later found to be **planar** — a trivial
+> mean-plane fit scores 0.01 m there, beating every learned model. So this +7 m
+> "win" over harmonic only reflects harmonic's sag pathology on planes, not a
+> meaningful structured-extrapolation result; test_ood is excluded from the
+> headline. The meaningful generalisation is the test_id row below.
+
 | method | mean (5 seeds) |
 |---|---|
 | harmonic | 58.3 |
@@ -2319,7 +2325,7 @@ loses only Horizon5-OutSpace by +5). The best-of-both generalises to an entirely
 held-out reservoir group — the cross-distribution claim holds, at the same margin
 as val.
 
-### test_id: wins 6 of 7 surfaces, but one catastrophic outlier flips the aggregate
+### test_id: leads the ex-outlier aggregate, but wins only 3 of 7 surfaces by count
 
 | method | all 7 | ex-FUNDO_DO_MAR (6) |
 |---|---|---|
@@ -2338,10 +2344,11 @@ Per-surface deficit (Δ = hybrid − harmonic):
 | 06TopoCretaceoSuperior | 412k | 125 | 221.4 | 208.7 | +12.7 |
 | **FUNDO_DO_MAR** | **10k** | **54** | **212.9** | **62.3** | **+150.7** |
 
-The hybrid wins 6 of 7 test_id surfaces (incl. the large 165k by −37 and the
-small extrapolation by −38); excluding the outlier it leads 160.0 vs 168.8
-(~+9 m). But **FUNDO_DO_MAR alone (+150.7) flips the all-7 aggregate to a 14 m
-loss.**
+By surface count the hybrid wins only **3 of 7** (07TopoCenomaniano −36.7,
+TestHorizon3 −38.0, 02_MCinza −2.6) and loses 4 — but three of those losses are
+tiny (+0.6, +11.1, +12.7) and its two wins are large, so by **aggregate RMSE it
+leads once the outlier is removed** (160.0 vs 168.8, ~+9 m). But **FUNDO_DO_MAR
+alone (+150.7) flips the all-7 aggregate to a 14 m loss.**
 
 ### The failure mode: the GNN refinement can degrade harmonic on outlier surfaces
 
@@ -2352,14 +2359,15 @@ vertices, a far higher depth-to-size ratio than any train surface (their
 that geometry and instead corrupt the harmonic field — the O21 "GNN degrades
 harmonic" risk, which the shallow rollout avoids on most surfaces but not all.
 This is a genuine tail risk: the hybrid is best on average and generalises
-(val +7, test_ood +7, 6/7 test_id +9), but is **not uniformly safe**.
+(val +7, test_ood +7, and the ex-outlier test_id aggregate +9), but is **not
+uniformly safe**.
 
 ### Implications
 
-- **Headline, honestly stated:** the hybrid beats harmonic on val (+7), test_ood
-  (+7), and 6 of 7 test_id surfaces; the test_id aggregate is a loss only because
-  of one pathological surface. Best approach overall, with a characterised tail
-  risk.
+- **Headline, honestly stated:** the hybrid beats harmonic on val (+7) and on the
+  test_id ex-outlier aggregate (+9); by surface count it wins 3 of 7 (its losses
+  mostly tiny). The all-7 test_id aggregate is a loss only because of one
+  pathological surface. Best approach overall, with a characterised tail risk.
 - **Mitigation (future work):** the failure is the correction moving z far from
   harmonic. A bound on the deviation ‖z − z_harmonic‖ (a targeted cap, distinct
   from the per-step λ_r of O22) would keep the small beneficial corrections while
@@ -2374,6 +2382,11 @@ This is a genuine tail risk: the hybrid is best on average and generalises
 ---
 
 ## O27 — Final three-phase test comparison: no single best model; the regime decides
+
+> **Superseded in part by O28.** The test_ood-based "rollout wins small" conclusion
+> below is wrong: test_ood was later found to be **planar** (a trivial mean-plane
+> fit reconstructs it to 0.01 m), so it does not test structured extrapolation and
+> is excluded. The corrected, structured-surface conclusion is in O28.
 
 **Observed in:** the three phase-best models scored on the held-out test sets,
 per the D12.5 convention (test_ood = the common ground, the same 5 R7 surfaces
@@ -2407,8 +2420,8 @@ handicap is unmistakable.
 
 On surfaces that include the 165k/412k, **the rollout collapses (253 m)** — the
 depth crossover (O19) in full force — while the **hybrid (167.6, or 160.0 without
-the FUNDO_DO_MAR outlier) is far better and beats harmonic on 6 of 7 surfaces**
-(O26).
+the FUNDO_DO_MAR outlier) is far better; it leads the ex-outlier aggregate and
+wins 3 of 7 surfaces by count** (O26).
 
 ### Conclusion: regime-dependent, governed by the harmonic backbone
 
@@ -2432,6 +2445,72 @@ purpose choice that never collapses.
 - Runs: Phase 1 run_20260614_155745, Phase 2 run_20260621_171110, Phase 3
   run_20260623_115850. Eval `noise_band.py --split test_id / test_ood`, 5 seeds.
   Comparison convention: D12.5.
+
+---
+
+## O28 — The mean-plane baseline: test_ood is planar (excluded), and the full structured-surface picture
+
+**Observed in:** a trivial **mean-plane** baseline (least-squares plane through K)
+added to `noise_band.py` and run alongside the model and harmonic on the test
+splits; surfaces rendered by deviation-from-best-fit-plane
+(`scripts/viz_planarity.py`).
+
+### test_ood is planar — and therefore an uninformative benchmark
+
+The mean-plane reconstructs **every** test_ood (R7) surface to **0.01 m**
+(`viz_planarity.py --split test_ood`: plane-residual RMSE = 0.01 m on all five).
+These "Horizon-OutSpace" surfaces are essentially **tilted planes**, which reframes
+the small-surface result entirely:
+
+| test_ood (planar) | RMSE |
+|---|---|
+| **mean-plane** | **0.01** |
+| rollout (Phase 2) | 7.8 |
+| hybrid | 51.1 |
+| harmonic | 58.3 |
+
+The rollout does **not** "win" here — a trivial plane fit is unbeatable, and the
+learned models only *add* error to an already-planar surface. Harmonic's 58 m is a
+**pathology, not a fair loss**: graph-Laplacian harmonic infill does not preserve a
+linear trend on an irregular mesh, so it sags toward the mean instead of continuing
+the plane. Planar extrapolation is trivially solved and does not test structured
+reconstruction, so **test_ood is excluded from the headline results** — an
+objective, result-independent criterion (planarity), not cherry-picking. By
+contrast, test_id surfaces deviate **6–249 m** from any plane
+(`viz_planarity.py --split test_id`) — genuinely structured.
+
+### The structured-surface picture (test_id), against both classical baselines
+
+| test_id (structured) | RMSE |
+|---|---|
+| harmonic | 153.6 |
+| **hybrid** | **167.6** (160.0 ex-FUNDO_DO_MAR) |
+| mean-plane | 232.4 |
+| rollout (Phase 2) | 253.4 |
+
+The **hybrid is the best learned model**: it beats both trivial baselines
+(mean-plane 232, rollout 253) and **matches harmonic** (154) — it wins on val
+(79.5 vs 86.8) and on test_id once the FUNDO_DO_MAR outlier is removed (O26). The
+**pure rollout is worse than a flat plane** on these surfaces — the depth collapse
+(O19), now quantified against the trivial floor.
+
+### Correction to O27
+
+O27 concluded "the rollout wins small-surface extrapolation; no single best model,
+regime-dependent." With the mean-plane in hand, that conclusion is **wrong on the
+small side**: the "small surfaces" were planar, where the trivial baseline is
+perfect and harmonic uniquely fails. The honest conclusion is: **on structured
+surfaces the hybrid is the best learned model and matches the classical state of
+the art (harmonic); the naive rollout collapses on large surfaces (worse than a
+flat plane).** The mean-plane does double duty — a sanity floor *and* the planarity
+detector that retired test_ood.
+
+### Where the result lives
+
+- `noise_band.py` (meanplane column) on run_20260621_171110 (rollout) and
+  run_20260623_115850 (hybrid), `--split test_id` / `--split test_ood`, 5 seeds.
+- `scripts/viz_planarity.py`; figures `test_ood_planar.png`,
+  `test_id_structured.png`, and `phase_results.png` (test_id 4-bar).
 
 ---
 
