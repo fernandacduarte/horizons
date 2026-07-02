@@ -27,7 +27,6 @@ env/
 .DS_Store
 
 # Hydra
-outputs/
 multirun/
 .hydra/
 
@@ -55,4 +54,6 @@ data/surfaces/*
 # Evaluation outputs
 *.csv
 !tests/fixtures/*.csv
+!ts_audit.csv
 *.egg-info/
+*.log
