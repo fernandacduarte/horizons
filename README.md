@@ -53,7 +53,7 @@ Then open http://localhost:6006
 ```bash
 python scripts/eval_run.py outputs/tensorboard/run_<TIMESTAMP>
 ```
-This evaluates on val (3 masks per surface), saves a JSON record to
+This evaluates on val (10 masks per surface), saves a JSON record to
 `outputs/evaluation/`, and generates the four diagnostic plots to
 `outputs/evaluation/plots/`.
 
@@ -70,6 +70,74 @@ ckpt = load_checkpoint(latest_checkpoint())
 print(f'epoch: {ckpt.epoch}, best_val_loss: {ckpt.best_val_loss:.2f}')
 "
 ```
+
+## Reproducible results
+
+Two trained checkpoints are committed to this repository so the results can be
+re-checked **without retraining**. Both were trained with the split
+(`data/splits/split_v2.json`), `seed: 42`, and per-surface normalization. Each
+run directory ships its `best.pt`, the exact `config.yaml` snapshot,
+`summary.json`, and the TensorBoard log.
+
+| Run directory | Approach | Init | What it is |
+|---|---|---|---|
+| `outputs/tensorboard/run_20260621_171110` | rollout (standard) | meanplane | the masked-rollout model |
+| `outputs/tensorboard/run_20260623_115850` | hybrid (harmonic init + 3 GNN refine passes) | harmonic | the hybrid model |
+
+### Checking the results (no training needed)
+
+`eval_run.py` reads each run's `config.yaml`, so it auto-detects the
+architecture, init method, split, and approach — just point it at the run
+directory:
+
+```bash
+# rollout model
+python scripts/eval_run.py outputs/tensorboard/run_20260621_171110
+
+# hybrid model
+python scripts/eval_run.py outputs/tensorboard/run_20260623_115850
+```
+
+Each command evaluates on the `val` split (10 masks per surface, with fixed
+mask-draw seeds so the numbers are deterministic and reproducible), prints the
+overall and per-regime RMSE of the model against the mean-plane and harmonic
+baselines, writes a JSON record to `outputs/evaluation/`, and regenerates the
+diagnostic plots under `outputs/evaluation/plots/`.
+
+To check generalization on the held-out test surfaces, switch the split:
+
+```bash
+python scripts/eval_run.py outputs/tensorboard/run_20260623_115850 --split test_id   # in-distribution
+python scripts/eval_run.py outputs/tensorboard/run_20260623_115850 --split test_ood  # out-of-distribution
+```
+
+The training summary for each run (best epoch, early-stop reason, final losses)
+is recorded in its `summary.json`; the RMSE tables are produced by the
+`eval_run.py` commands above.
+
+### Inspecting the predictions visually
+
+```bash
+python scripts/viz_prediction.py outputs/tensorboard/run_20260623_115850 --split test_ood --index 0
+python scripts/viz_prediction_with_error.py outputs/tensorboard/run_20260623_115850 --split test_ood --index 0
+```
+
+See [Visualization](#visualization) below for all options; add `--out fig.png`
+to save a PNG headlessly instead of opening a window.
+
+### Retraining from scratch (optional)
+
+The full hyperparameters live in each run's `config.yaml`. The rollout run uses
+the shipped defaults; the hybrid run only overrides the approach and init:
+
+```bash
+python scripts/train.py                                              # ~ run_20260621_171110 (rollout)
+python scripts/train.py approach=hybrid data.init_method=harmonic    # ~ run_20260623_115850 (hybrid)
+```
+
+Both were trained on GPU (`train.device=cuda`); on different hardware the numbers
+should land very close but may not be bit-for-bit identical, so the committed
+checkpoints above are the reference for exact reproduction.
 
 ## Visualization
 
