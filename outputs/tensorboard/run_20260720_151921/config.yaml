@@ -1,0 +1,65 @@
+seed: 42
+data:
+  surfaces_dir: data/surfaces
+  split_file: data/splits/split_v2.json
+  normalize_per_surface: true
+  init_method: meanplane
+  n_masks_per_epoch: 3
+mask:
+  regime_weights:
+    half_plane: 0.3
+    outward_free: 0.4
+    outward_pinned: 0.3
+  half_plane_phi:
+  - 0.3
+  - 0.5
+  outward_phi:
+  - 0.5
+  - 0.7
+  outward_rect_offset_std: 0.05
+  outward_rect_aspect_range:
+  - 0.5
+  - 2.0
+  pinned_ring_thickness: 1
+features:
+  recompute_per_iteration: true
+model_kind: operator
+approach: rollout
+model:
+  type: sage
+  n_layers: 2
+  hidden_dim: 64
+  aggr: mean
+  output_init_scale: 0.01
+loss:
+  lambda_f: 1.0
+  lambda_p: 0.1
+  lambda_c: 0.01
+  lambda_r: 0.001
+  rollout_weight: uniform
+  equal_ring_weight: true
+optim:
+  type: adamw
+  lr: 0.001
+  lr_min: 1.0e-05
+  weight_decay: 0.0001
+  grad_clip_norm: 1.0
+  accum_steps: 4
+train:
+  n_epochs: 200
+  patience: 30
+  lr_schedule: cosine
+  warmup_epochs: 5
+  val_every: 1
+  log_every_steps: 10
+  device: cpu
+  best_metric: val_rmse_meters
+  grad_checkpoint: true
+  log_dir: outputs/tensorboard
+  ckpt_dir: outputs/checkpoints
+  ckpt_keep_last: 3
+rollout:
+  method: standard
+  n_multiplier: 2
+hybrid:
+  n_passes: 3

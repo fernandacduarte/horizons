@@ -103,6 +103,7 @@ def train(
     lambda_p: float = 0.1,
     lambda_c: float = 0.01,
     lambda_r: float = 0.001,
+    equal_ring_weight: bool = False,
     val_every: int = 5,
     log_every_steps: int = 10,
     device: str | torch.device = "cpu",
@@ -118,6 +119,7 @@ def train(
     best_metric: str = "val_loss",
     use_checkpoint: bool = False,
     rollout_method: str = "standard",
+    rollout_n_multiplier: float = 1,
     approach: str = "rollout",
     hybrid_n_passes: int = 3,
 ) -> TrainState:
@@ -234,7 +236,8 @@ def train(
                 # hybrid: harmonic-filled init, refined by a fixed shallow number
                 # of passes (no surface-depth march), supervised by all-U MSE.
                 # rollout: the standard surface-depth rollout + per-ring loss.
-                N = hybrid_n_passes if approach == "hybrid" else item["N"]
+                N = (hybrid_n_passes if approach == "hybrid" 
+                     else max(1, round(rollout_n_multiplier * item["N"])))
 
                 result = rollout(
                     model,
@@ -253,6 +256,7 @@ def train(
                         z_true=z_true, d=d, edge_index=edge_index, mask=mask,
                         lambda_f=lambda_f, lambda_p=lambda_p,
                         lambda_c=lambda_c, lambda_r=lambda_r,
+                        equal_ring_weight=equal_ring_weight,
                     )
                 loss = loss_dict["total"]
 
@@ -362,6 +366,8 @@ def train(
                 lambda_f=lambda_f, lambda_p=lambda_p,
                 lambda_c=lambda_c, lambda_r=lambda_r,
                 approach=approach, hybrid_n_passes=hybrid_n_passes,
+                rollout_n_multiplier=rollout_n_multiplier,
+                equal_ring_weight=equal_ring_weight,
             )
             val_record = {
                 "epoch": epoch,

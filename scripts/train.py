@@ -96,6 +96,7 @@ def main(cfg: DictConfig) -> None:
             lambda_p=cfg.loss.lambda_p,
             lambda_c=cfg.loss.lambda_c,
             lambda_r=cfg.loss.lambda_r,
+            equal_ring_weight=cfg.loss.equal_ring_weight,
             val_every=cfg.train.val_every,
             log_every_steps=cfg.train.log_every_steps,
             device=cfg.train.device,
@@ -109,6 +110,7 @@ def main(cfg: DictConfig) -> None:
             best_metric=cfg.train.best_metric,
             use_checkpoint=cfg.train.grad_checkpoint,
             rollout_method=cfg.rollout.method,
+            rollout_n_multiplier=cfg.rollout.n_multiplier,
             approach=cfg.approach,
             hybrid_n_passes=cfg.hybrid.n_passes,
         )

@@ -27,51 +27,47 @@ def per_iteration_data_loss(
     t: int,
     lambda_f: float = 1.0,
     lambda_p: float = 0.1,
+    equal_ring_weight: bool = False,
 ) -> torch.Tensor:
     """Per-iteration data loss L_{data,t}.
 
-    L_{data,t} = lambda_f * mean_{i in F_t} (z^t_i - z_true_i)^2
-               + lambda_p * mean_{i in P_t} (z^t_i - z_true_i)^2
+    Two modes:
+    - equal_ring_weight=False (default): weighted frontier/filled split.
+      L_{data,t} = lambda_f * mean_{i in F_t}(err^2) + lambda_p * mean_{i in P_t}(err^2),
+      with F_t = {i : d_i = t} (frontier) and P_t = {i : 0 < d_i < t} (filled).
+    - equal_ring_weight=True: a single uniform mean over every vertex the front
+      has reached (0 < d_i <= t), no frontier/filled split. lambda_f and lambda_p
+      are ignored in this mode.
 
-    where F_t = {i : d_i = t} (frontier) and P_t = {i : 0 < d_i < t}
-    (already-filled region; we exclude i in K because d_i = 0 there and
-    z^t equals z_true exactly on K by construction).
-
-     Note
-    ----
-    We use mean instead of sum. This stabilizes the relative magnitude of L_t across iterations.
-    For example, in outward rectangle regime, early t has tiny |F_t|,
-    later t has growing |P_t|, making the rollout weights w_t in the total loss easier to reason about.
+    In both modes K is excluded (d_i = 0, where z^t == z_true by construction).
 
     Parameters
     ----------
     z_t : (n,) float — predicted z at iteration t
     z_true : (n,) float — ground truth
     d : (n,) int64 — topological distance from K
-    t : int — iteration index, 1 <= t <= N
-    lambda_f, lambda_p : float — weights
-
-    Returns
-    -------
-    L_t : scalar torch.Tensor
-        The per-iteration data loss. Differentiable w.r.t. z_t.
+    t : int — iteration index, 1 <= t
+    lambda_f, lambda_p : float — frontier/filled weights (unused if equal_ring_weight)
+    equal_ring_weight : bool — if True, supervise all reached vertices equally
     """
     if t < 1:
         raise ValueError(f"t must be >= 1; got {t}")
 
     sq_err = (z_t - z_true).pow(2)
 
+    if equal_ring_weight:
+        reached = (d > 0) & (d <= t)          # every reached unknown vertex, equal weight
+        return sq_err[reached].mean() if reached.any() else sq_err.new_zeros(())
+
     # Frontier: d_i = t
     frontier = d == t
     L_f = sq_err[frontier].mean() if frontier.any() else sq_err.new_zeros(())
 
-    # Already-filled: 0 < d_i < t. Strictly > 0 excludes K (where d_i = 0
-    # and the squared error is structurally 0 anyway).
+    # Already-filled: 0 < d_i < t (strictly > 0 excludes K).
     filled = (d > 0) & (d < t)
     L_p = sq_err[filled].mean() if filled.any() else sq_err.new_zeros(())
 
     return lambda_f * L_f + lambda_p * L_p
-
 
 def per_iteration_curvature_loss(
     z_t: torch.Tensor,
@@ -137,6 +133,7 @@ def rollout_loss(
     lambda_p: float = 0.1,
     lambda_c: float = 0.01,
     lambda_r: float = 0.001,
+    equal_ring_weight: bool = False,
     rollout_weights: list[float] | None = None,
 ) -> dict[str, torch.Tensor]:
     """Total rollout loss: L = sum_t w_t (L_{data,t} + lc * L_{curv,t} + lr * L_{res,t}).
@@ -188,6 +185,7 @@ def rollout_loss(
         L_data = per_iteration_data_loss(
             z_trajectory[t], z_true, d, t,
             lambda_f=lambda_f, lambda_p=lambda_p,
+            equal_ring_weight=equal_ring_weight,
         )
         L_curv = per_iteration_curvature_loss(
             z_trajectory[t], edge_index, unknown_mask

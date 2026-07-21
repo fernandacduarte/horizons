@@ -78,6 +78,7 @@ loss:
   lambda_c: 0.01                     # curvature regularizer
   lambda_r: 0.001                    # residual-step regularizer
   rollout_weight: uniform            # uniform (constant for all rings) | linear (later rings heavier)
+  equal_ring_weight: false           # true: supervise every reached vertex equally (ignores lambda_f/lambda_p)
 
 # --------------------------------------------------------
 # Optimizer (Stages 8, 9)
@@ -110,6 +111,7 @@ train:
 
 rollout:
   method: standard                   # standard | freeze_filled  (Phase-3 rollout variants)
+  n_multiplier: 1                    # k: run k * surface_depth rollout steps (1 = standard rollout)
 
 hybrid:
   n_passes: 3                        # GNN refinement passes over the harmonic-filled field (fixed, depth-independent)

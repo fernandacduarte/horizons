@@ -25,8 +25,10 @@ def validate(
     lambda_p: float = 0.1,
     lambda_c: float = 0.01,
     lambda_r: float = 0.001,
+    equal_ring_weight: bool = False,
     approach: str = "rollout",
     hybrid_n_passes: int = 3,
+    rollout_n_multiplier: float = 1,
 ) -> dict:
     """Compute mean validation loss and per-surface diagnostics.
 
@@ -75,7 +77,8 @@ def validate(
         mask = item["mask"].to(device)
         d = item["d"].to(device)
         surface_N = item["N"]
-        N = hybrid_n_passes if approach == "hybrid" else surface_N
+        N = (hybrid_n_passes if approach == "hybrid" 
+             else max(1, round(rollout_n_multiplier * surface_N)))
 
         result = rollout(
             model,
@@ -92,6 +95,7 @@ def validate(
                 z_true=z_true, d=d, edge_index=edge_index, mask=mask,
                 lambda_f=lambda_f, lambda_p=lambda_p,
                 lambda_c=lambda_c, lambda_r=lambda_r,
+                equal_ring_weight=equal_ring_weight,
             )
 
         # Compute RMSE on U at final iteration. The model operates in

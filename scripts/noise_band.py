@@ -51,6 +51,7 @@ def main() -> None:
     rollout_method = cfg.get("rollout", {}).get("method", "standard")
     approach = cfg.get("approach", "rollout")
     hybrid_n_passes = int(cfg.get("hybrid", {}).get("n_passes", 3))
+    rollout_n_multiplier = float(cfg.get("rollout", {}).get("n_multiplier", 1))
 
     ckpt = load_checkpoint(
         args.run_dir / "best.pt",
@@ -75,7 +76,8 @@ def main() -> None:
             normalize_per_surface=normalize, init_method=init_method,
             split_file=split_file, device=args.device,
             rollout_method=rollout_method,
-            approach=approach, hybrid_n_passes=hybrid_n_passes,
+            approach=approach, hybrid_n_passes=hybrid_n_passes, 
+            rollout_n_multiplier=rollout_n_multiplier,
         )
         all_records.extend(result.records)
         overall = aggregate_overall(result)

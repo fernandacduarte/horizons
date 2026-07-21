@@ -76,6 +76,7 @@ def evaluate_surface(
     rollout_method: str = "standard",
     approach: str = "rollout",
     hybrid_n_passes: int = 3,
+    rollout_n_multiplier: float = 1,
 ) -> SurfaceEvalResult:
     """Run the model on one surface and compute per-ring metrics.
 
@@ -143,7 +144,8 @@ def evaluate_surface(
     # hybrid runs a fixed shallow rollout from the harmonic-filled field;
     # standard marches the full surface depth. N (surface depth) is kept for the
     # per-ring breakdown and the record, so hybrid points land at their true N.
-    rollout_N = hybrid_n_passes if approach == "hybrid" else N
+    rollout_N = (hybrid_n_passes if approach == "hybrid" 
+                 else max(1, round(rollout_n_multiplier * N)))
 
     # Move to device
     V_xy = V_centered[:, :2].to(device)

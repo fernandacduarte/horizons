@@ -65,6 +65,7 @@ def evaluate_split(
     rollout_method: str = "standard",
     approach: str = "rollout",
     hybrid_n_passes: int = 3,
+    rollout_n_multiplier: float = 1,
 ) -> EvalResult:
     """Evaluate model + baselines on every surface in a split, with
     multiple mask samples per surface.
@@ -102,6 +103,7 @@ def evaluate_split(
                 rollout_method=rollout_method,
                 approach=approach,
                 hybrid_n_passes=hybrid_n_passes,
+                rollout_n_multiplier=rollout_n_multiplier,
             )
 
             # Now compute baselines on the SAME mask. We have to re-sample
