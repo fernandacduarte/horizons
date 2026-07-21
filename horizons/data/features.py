@@ -12,7 +12,7 @@ import torch
 def compute_vertex_normals(
     V: torch.Tensor,
     F: torch.Tensor,
-    eps: float = 1e-12,
+    eps: float = 1e-8,
 ) -> torch.Tensor:
     """Area-weighted vertex normals for a triangle mesh.
 
@@ -28,8 +28,13 @@ def compute_vertex_normals(
     F : torch.Tensor, shape (n_faces, 3), int64
         Triangle indices.
     eps : float
-        Small value added to the norm denominator for numerical stability
-        (prevents 0/0 for isolated or degenerate vertices).
+        Smoothing floor for the norm: the denominator is
+        sqrt(||n||^2 + eps^2), which keeps both the forward AND the
+        backward pass finite for degenerate vertices. The backward of
+        torch.linalg.norm at a zero vector is NaN (0/0), and a bare
+        `norm + eps` denominator still lets gradients grow like 1/eps^2
+        on near-degenerate normals, overflowing float32 during deep
+        rollouts. With eps=1e-8 the gradient is bounded by ~1/eps = 1e8.
 
     Returns
     -------
@@ -56,9 +61,11 @@ def compute_vertex_normals(
     for k in range(3):
         vertex_normals.index_add_(0, F[:, k], face_normals)
 
-    # Per-vertex normalization
-    norm = torch.linalg.norm(vertex_normals, dim=1, keepdim=True)
-    return vertex_normals / (norm + eps)
+    # Per-vertex normalization. Smoothed norm: sqrt(||n||^2 + eps^2) is
+    # differentiable everywhere (including exactly-zero normals), unlike
+    # torch.linalg.norm whose backward is NaN at 0.
+    sq_norm = (vertex_normals * vertex_normals).sum(dim=1, keepdim=True)
+    return vertex_normals / torch.sqrt(sq_norm + eps * eps)
 
 
 def compute_umbrella_laplacian(
