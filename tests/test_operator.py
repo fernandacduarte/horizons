@@ -307,3 +307,53 @@ class TestConvType:
     def test_unknown_conv_type_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown conv_type"):
             LocalOperator(conv_type="gmm")
+
+# ----------------------------------------------------------------------
+# Mask feature encoding (mask_mode)
+# ----------------------------------------------------------------------
+class TestMaskMode:
+    def test_binary_matches_bool_cast(self) -> None:
+        """Default mode reproduces the original encoding: mask as 0/1 float."""
+        model = LocalOperator(mask_mode="binary")
+        mask = torch.tensor([True, False, True, False])
+        d = torch.tensor([0, 1, 0, 2], dtype=torch.int64)
+        m = model._mask_feature(mask, d, torch.float32)
+        assert m.shape == (4, 1)
+        assert torch.equal(m.squeeze(1), mask.float())
+
+    def test_soft_distance_ramp(self) -> None:
+        """Unknown vertices get m = 1 - d/(N+1); known stay exactly 1;
+        unreachable (d = -1) get 0."""
+        model = LocalOperator(mask_mode="soft_distance")
+        mask = torch.tensor([True, False, False, False, False])
+        d = torch.tensor([0, 1, 2, 3, -1], dtype=torch.int64)  # N = 3
+        m = model._mask_feature(mask, d, torch.float32).squeeze(1)
+        expected = torch.tensor([1.0, 1 - 1 / 4, 1 - 2 / 4, 1 - 3 / 4, 0.0])
+        assert torch.allclose(m, expected)
+
+    def test_soft_distance_all_known_degenerate(self) -> None:
+        """All-known surface (d = 0 everywhere) must not divide by zero
+        and must give mask 1 everywhere."""
+        model = LocalOperator(mask_mode="soft_distance")
+        mask = torch.ones(4, dtype=torch.bool)
+        d = torch.zeros(4, dtype=torch.int64)
+        m = model._mask_feature(mask, d, torch.float32).squeeze(1)
+        assert torch.equal(m, torch.ones(4))
+
+    def test_soft_distance_forward_shape(self, anticline: HorizonSurface) -> None:
+        """Full forward pass runs with the soft mask on a real surface."""
+        model = LocalOperator(mask_mode="soft_distance")
+        inputs = _build_inputs(anticline)
+        # Make a nontrivial mask: first half known, recompute d by BFS
+        n = anticline.n_vertices
+        inputs["mask"] = torch.arange(n) < n // 2
+        inputs["d"] = compute_topological_distance(
+            inputs["edge_index"], inputs["mask"]
+        )
+        dz = model(**inputs)
+        assert dz.shape == (n,)
+        assert torch.isfinite(dz).all()
+
+    def test_unknown_mask_mode_raises(self) -> None:
+        with pytest.raises(ValueError, match="mask_mode"):
+            LocalOperator(mask_mode="fuzzy")

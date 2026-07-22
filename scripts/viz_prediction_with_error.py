@@ -90,6 +90,7 @@ def main() -> None:
         n_message_passing=int(cfg.get("model", {}).get("n_layers", 2)),
         conv_type=cfg.get("model", {}).get("type", "sage"),
         aggr=cfg.get("model", {}).get("aggr", "mean"),
+        mask_mode=cfg.get("model", {}).get("mask_mode", "binary"),
     ).model
     init_method = cfg.get("data", {}).get("init_method", "meanplane")
     normalize = bool(cfg.get("data", {}).get("normalize_per_surface", False))

@@ -64,6 +64,7 @@ def main() -> None:
     hybrid_n_passes = int(cfg.get("hybrid", {}).get("n_passes", 3))
     conv_type = cfg.get("model", {}).get("type", "sage")
     aggr = cfg.get("model", {}).get("aggr", "mean")
+    mask_mode = cfg.get("model", {}).get("mask_mode", "binary")
 
     if hidden_dim != 64:
         print(f"  detected hidden_dim={hidden_dim} from config.yaml")
@@ -76,6 +77,7 @@ def main() -> None:
         n_message_passing=n_layers,
         conv_type=conv_type,
         aggr=aggr,
+        mask_mode=mask_mode,
     )
     print(f"  best_val_loss: {ckpt.best_val_loss:.2f} (epoch {ckpt.epoch})")
     print()
@@ -89,6 +91,8 @@ def main() -> None:
         print(f"  detected init_method={init_method!r} from config.yaml")
     if conv_type != "sage":
         print(f"  detected conv_type={conv_type!r} (aggr={aggr}) from config.yaml")
+    if mask_mode != "binary":
+        print(f"  detected mask_mode={mask_mode!r} from config.yaml")
     print()
 
 

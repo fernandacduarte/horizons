@@ -91,6 +91,7 @@ def main(cfg: DictConfig) -> None:
             hidden_dim=cfg.model.hidden_dim,
             n_message_passing=cfg.model.n_layers,
             output_init_scale=cfg.model.output_init_scale,
+            mask_mode=cfg.model.get("mask_mode", "binary"),
         ).to(device)
     else:
         raise ValueError(f"Unknown model_kind {model_kind!r}")

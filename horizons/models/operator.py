@@ -55,6 +55,13 @@ class LocalOperator(nn.Module):
         Neighbour aggregation for each layer ("mean", "max", ...), passed
         straight to the underlying conv. SAGE uses "mean"; EdgeConv is
         canonically "max".
+    mask_mode : str
+        How the mask input feature is encoded:
+        - "binary" (default): 1.0 for known vertices, 0.0 for unknown.
+        - "soft_distance": known vertices keep 1.0; unknown vertices get
+          a reliability ramp m_U = 1 - d/(N+1), where N = max d over the
+          surface, so reliability decays linearly with distance from the
+          known set. Unreachable vertices (d = -1) get 0.0.
     """
 
     N_INPUT_FEATURES = 9  # (x, y, z, n_x, n_y, n_z, kappa, mask, d)
@@ -66,15 +73,22 @@ class LocalOperator(nn.Module):
         output_init_scale: float = 0.01,
         conv_type: str = "sage",
         aggr: str = "mean",
+        mask_mode: str = "binary",
     ) -> None:
         super().__init__()
         if n_message_passing < 1:
             raise ValueError(
                 f"n_message_passing must be >= 1; got {n_message_passing}"
             )
+        if mask_mode not in ("binary", "soft_distance"):
+            raise ValueError(
+                f"unknown mask_mode {mask_mode!r}; "
+                f"expected 'binary' or 'soft_distance'"
+            )
 
         self.conv_type = conv_type
         self.aggr = aggr
+        self.mask_mode = mask_mode
 
         # Input projection: 9 features -> hidden_dim
         # self.input_proj = nn.Sequential(
@@ -125,6 +139,36 @@ class LocalOperator(nn.Module):
             f"Unknown conv_type {conv_type!r}; expected 'sage' or 'edgeconv'"
         )
 
+    def _mask_feature(
+        self,
+        mask: torch.Tensor,          # (n,) bool — True = known
+        d: torch.Tensor,             # (n,) int64 — topological distance
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        """Encode the mask input feature according to mask_mode.
+
+        "binary": 1.0 for known, 0.0 for unknown.
+        "soft_distance": known vertices keep 1.0; unknown vertices get the
+        reliability ramp m_U = 1 - d/(N+1) with N = max d over the surface
+        (so the farthest unknown ring still gets 1/(N+1) > 0, and the ramp
+        is scale-free across surfaces of different depths). Unreachable
+        vertices (d = -1 sentinel) get 0.0 — least reliable of all.
+
+        Returns
+        -------
+        mask_f : torch.Tensor, shape (n, 1), dtype `dtype`
+        """
+        if self.mask_mode == "binary":
+            return mask.to(dtype).unsqueeze(1)
+
+        # soft_distance. N = surface depth (max reachable d); clamp guards
+        # the degenerate all-known / all-unreachable cases (denominator >= 2).
+        depth = d.max().clamp(min=1).to(dtype)
+        m = 1.0 - d.to(dtype) / (depth + 1.0)
+        m = torch.where(mask, torch.ones_like(m), m)   # known: exactly 1
+        m = torch.where(d < 0, torch.zeros_like(m), m)  # unreachable: 0
+        return m.unsqueeze(1)
+
     def forward(
         self,
         z: torch.Tensor,             # (n,) — current scalar z^t
@@ -151,7 +195,7 @@ class LocalOperator(nn.Module):
 
         # Assemble the 9-dim feature vector
         # Cast mask and d to float for tensor concat
-        mask_f = mask.to(z.dtype).unsqueeze(1)                     # (n, 1)
+        mask_f = self._mask_feature(mask, d, z.dtype)              # (n, 1)
         d_f = d.to(z.dtype).unsqueeze(1)                           # (n, 1)
         features = torch.cat([
             V_xy,                       # (n, 2): x, y

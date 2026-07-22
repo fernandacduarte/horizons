@@ -60,6 +60,7 @@ def main(cfg: DictConfig) -> None:
             output_init_scale=cfg.model.output_init_scale,
             conv_type=cfg.model.type,
             aggr=cfg.model.aggr,
+            mask_mode=cfg.model.get("mask_mode", "binary"),
         )
     elif model_kind == "placeholder":
         model = TinySAGE(hidden_dim=32, output_init_scale=0.01)
