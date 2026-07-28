@@ -91,12 +91,12 @@ class LocalOperator(nn.Module):
         self.mask_mode = mask_mode
 
         # Input projection: 9 features -> hidden_dim
-        # self.input_proj = nn.Sequential(
-        #     nn.Linear(self.N_INPUT_FEATURES, hidden_dim),
-        #     nn.ReLU(),
-        #     nn.Linear(hidden_dim, hidden_dim),
-        # )
-        self.input_proj = nn.Linear(self.N_INPUT_FEATURES, hidden_dim)
+        # self.input_proj = nn.Linear(self.N_INPUT_FEATURES, hidden_dim)
+        self.input_proj = nn.Sequential(
+            nn.Linear(self.N_INPUT_FEATURES, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
 
         # Message-passing stack (operator chosen by conv_type)
         self.convs = nn.ModuleList([
