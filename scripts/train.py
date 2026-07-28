@@ -61,6 +61,7 @@ def main(cfg: DictConfig) -> None:
             conv_type=cfg.model.type,
             aggr=cfg.model.aggr,
             mask_mode=cfg.model.get("mask_mode", "binary"),
+            use_mask_feature=cfg.model.get("use_mask_feature", True),
         )
     elif model_kind == "placeholder":
         model = TinySAGE(hidden_dim=32, output_init_scale=0.01)
@@ -69,7 +70,11 @@ def main(cfg: DictConfig) -> None:
 
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model: {model_kind} ({cfg.model.type}, aggr={cfg.model.aggr}) "
-          f"| approach: {cfg.approach} | params: {n_params:,}\n")
+          f"| approach: {cfg.approach} | params: {n_params:,}")
+    if model_kind == "operator" and not model.use_mask_feature:
+        print("  ablation: use_mask_feature=False "
+              "(mask column dropped; input is 8-dim)")
+    print()
 
     # Set up TensorBoard run directory
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")

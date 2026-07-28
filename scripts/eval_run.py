@@ -65,6 +65,7 @@ def main() -> None:
     conv_type = cfg.get("model", {}).get("type", "sage")
     aggr = cfg.get("model", {}).get("aggr", "mean")
     mask_mode = cfg.get("model", {}).get("mask_mode", "binary")
+    use_mask_feature = bool(cfg.get("model", {}).get("use_mask_feature", True))
 
     if hidden_dim != 64:
         print(f"  detected hidden_dim={hidden_dim} from config.yaml")
@@ -78,6 +79,7 @@ def main() -> None:
         conv_type=conv_type,
         aggr=aggr,
         mask_mode=mask_mode,
+        use_mask_feature=use_mask_feature,
     )
     print(f"  best_val_loss: {ckpt.best_val_loss:.2f} (epoch {ckpt.epoch})")
     print()
@@ -91,7 +93,9 @@ def main() -> None:
         print(f"  detected init_method={init_method!r} from config.yaml")
     if conv_type != "sage":
         print(f"  detected conv_type={conv_type!r} (aggr={aggr}) from config.yaml")
-    if mask_mode != "binary":
+    if not use_mask_feature:
+        print("  detected use_mask_feature=False from config.yaml")
+    elif mask_mode != "binary":
         print(f"  detected mask_mode={mask_mode!r} from config.yaml")
     print()
 

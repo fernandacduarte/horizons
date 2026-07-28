@@ -48,6 +48,7 @@ def main() -> None:
     conv_type = cfg.get("model", {}).get("type", "sage")
     aggr = cfg.get("model", {}).get("aggr", "mean")
     mask_mode = cfg.get("model", {}).get("mask_mode", "binary")
+    use_mask_feature = bool(cfg.get("model", {}).get("use_mask_feature", True))
     split_file = cfg.get("data", {}).get("split_file", "data/splits/split_v1.json")
     rollout_method = cfg.get("rollout", {}).get("method", "standard")
     approach = cfg.get("approach", "rollout")
@@ -58,6 +59,7 @@ def main() -> None:
         args.run_dir / "best.pt",
         hidden_dim=hidden_dim, n_message_passing=n_layers,
         conv_type=conv_type, aggr=aggr, mask_mode=mask_mode,
+        use_mask_feature=use_mask_feature,
         device=args.device,
     )
     print(f"checkpoint: {args.run_dir.name}  (hidden={hidden_dim}, layers={n_layers}, "

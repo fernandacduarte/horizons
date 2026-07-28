@@ -68,7 +68,12 @@ model:
   hidden_dim: 64
   aggr: mean                         # for SAGEConv
   output_init_scale: 0.01            # small init for final layer
+  use_mask_feature: true             # false: drop the mask input column (9 -> 8 dims).
+                                     # Ablation arm for "does the mask feature help?".
+                                     # NB: d is still mask-derived, so this removes the
+                                     # explicit channel, not all mask information.
   mask_mode: binary                  # binary | soft_distance (unknown get m_U = 1 - d/(N+1))
+                                     # ignored when use_mask_feature: false
 
 # --------------------------------------------------------
 # Loss (Stage 7)

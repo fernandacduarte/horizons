@@ -39,6 +39,7 @@ CONFIG_FIELDS = [
     ("hidden", "model", "hidden_dim", 64),
     ("layers", "model", "n_layers", 2),
     ("mask_mode", "model", "mask_mode", "binary"),
+    ("use_mask_feat", "model", "use_mask_feature", True),
     ("approach", None, "approach", "rollout"),
     ("rollout", "rollout", "method", "standard"),
     ("kN", "rollout", "n_multiplier", 1),
@@ -142,6 +143,8 @@ def main() -> None:
             conv_type=config_value(cfg, "model", "type", "sage"),
             aggr=config_value(cfg, "model", "aggr", "mean"),
             mask_mode=config_value(cfg, "model", "mask_mode", "binary"),
+            use_mask_feature=bool(
+                config_value(cfg, "model", "use_mask_feature", True)),
             device=args.device,
         )
         stats: dict[str, list[float]] = {k: [] for k in ["overall", *REGIMES]}

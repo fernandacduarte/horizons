@@ -9,6 +9,9 @@ where (n_x, n_y, n_z) are the recomputed vertex normals from V_xy and z^t,
 and kappa is the umbrella Laplacian of z^t. Both are recomputed at every
 rollout iteration to capture the evolving geometry.
 
+With use_mask_feature=False the mask column is dropped and the input is
+8-dim — the ablation that measures whether the mask feature helps.
+
 Default pipeline:
     input MLP (9 -> H)
     SAGEConv (H -> H, mean aggr)
@@ -62,6 +65,17 @@ class LocalOperator(nn.Module):
           a reliability ramp m_U = 1 - d/(N+1), where N = max d over the
           surface, so reliability decays linearly with distance from the
           known set. Unreachable vertices (d = -1) get 0.0.
+        Ignored when use_mask_feature is False.
+    use_mask_feature : bool
+        Whether the mask is fed to the network as an input feature.
+        True (default) gives the 9-dim input above. False drops the mask
+        column, leaving 8 dims — the ablation arm for measuring whether
+        the mask feature helps or hurts. Note this only removes the
+        *explicit* mask channel: the topological-distance feature d is
+        still derived from the mask (d = 0 exactly on the known set), so
+        the network is not blind to which vertices are known.
+        This changes the input layer's shape, so checkpoints trained with
+        one setting cannot be loaded into a model built with the other.
     """
 
     N_INPUT_FEATURES = 9  # (x, y, z, n_x, n_y, n_z, kappa, mask, d)
@@ -74,6 +88,7 @@ class LocalOperator(nn.Module):
         conv_type: str = "sage",
         aggr: str = "mean",
         mask_mode: str = "binary",
+        use_mask_feature: bool = True,
     ) -> None:
         super().__init__()
         if n_message_passing < 1:
@@ -89,11 +104,16 @@ class LocalOperator(nn.Module):
         self.conv_type = conv_type
         self.aggr = aggr
         self.mask_mode = mask_mode
+        self.use_mask_feature = use_mask_feature
 
-        # Input projection: 9 features -> hidden_dim
-        # self.input_proj = nn.Linear(self.N_INPUT_FEATURES, hidden_dim)
+        # Input projection: 9 (or 8 without the mask column) -> hidden_dim
+        self.n_input_features = (
+            self.N_INPUT_FEATURES if use_mask_feature
+            else self.N_INPUT_FEATURES - 1
+        )
+        # self.input_proj = nn.Linear(self.n_input_features, hidden_dim)
         self.input_proj = nn.Sequential(
-            nn.Linear(self.N_INPUT_FEATURES, hidden_dim),
+            nn.Linear(self.n_input_features, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
@@ -193,18 +213,20 @@ class LocalOperator(nn.Module):
         normals = compute_vertex_normals(V_t, F)                   # (n, 3)
         kappa = compute_umbrella_laplacian(z, edge_index)          # (n,)
 
-        # Assemble the 9-dim feature vector
+        # Assemble the feature vector (9-dim, or 8-dim without the mask
+        # column when use_mask_feature is False).
         # Cast mask and d to float for tensor concat
-        mask_f = self._mask_feature(mask, d, z.dtype)              # (n, 1)
         d_f = d.to(z.dtype).unsqueeze(1)                           # (n, 1)
-        features = torch.cat([
+        columns = [
             V_xy,                       # (n, 2): x, y
             z.unsqueeze(1),             # (n, 1): z^t
             normals,                    # (n, 3): n_x, n_y, n_z
             kappa.unsqueeze(1),         # (n, 1): kappa
-            mask_f,                     # (n, 1): mask (0 or 1 as float)
-            d_f,                        # (n, 1): d (int as float)
-        ], dim=1)                       # (n, 9)
+        ]
+        if self.use_mask_feature:
+            columns.append(self._mask_feature(mask, d, z.dtype))   # (n, 1)
+        columns.append(d_f)             # (n, 1): d (int as float)
+        features = torch.cat(columns, dim=1)        # (n, 9) or (n, 8)
 
         # Input projection
         h = self.input_proj(features)                              # (n, H)

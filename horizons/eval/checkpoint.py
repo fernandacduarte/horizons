@@ -74,6 +74,7 @@ def load_checkpoint(
     conv_type: str = "sage",
     aggr: str = "mean",
     mask_mode: str = "binary",
+    use_mask_feature: bool = True,
     device: str | torch.device = "cpu",
 ) -> LoadedCheckpoint:
     """Load a checkpoint from disk.
@@ -87,12 +88,14 @@ def load_checkpoint(
         architecture of the saved model. If None, a fresh LocalOperator with
         the hidden_dim / n_message_passing arguments is constructed.
     hidden_dim, n_message_passing, output_init_scale, conv_type, aggr,
-    mask_mode :
+    mask_mode, use_mask_feature :
         Used only when constructing a fresh LocalOperator (i.e., when
         `model` is None). Must match the architecture the checkpoint was
         saved from. The defaults match the project's standard config.
         (mask_mode has no weights, so loading succeeds either way — but
-        it must match training for predictions to be meaningful.)
+        it must match training for predictions to be meaningful.
+        use_mask_feature does change the input layer's shape, so a
+        mismatch fails loudly at load time.)
     device : str | torch.device
         Device to place the model on. The model is also set to eval mode.
 
@@ -132,6 +135,7 @@ def load_checkpoint(
             conv_type=conv_type,
             aggr=aggr,
             mask_mode=mask_mode,
+            use_mask_feature=use_mask_feature,
         )
 
     # Load weights

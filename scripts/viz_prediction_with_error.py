@@ -91,6 +91,8 @@ def main() -> None:
         conv_type=cfg.get("model", {}).get("type", "sage"),
         aggr=cfg.get("model", {}).get("aggr", "mean"),
         mask_mode=cfg.get("model", {}).get("mask_mode", "binary"),
+        use_mask_feature=bool(
+            cfg.get("model", {}).get("use_mask_feature", True)),
     ).model
     init_method = cfg.get("data", {}).get("init_method", "meanplane")
     normalize = bool(cfg.get("data", {}).get("normalize_per_surface", False))
