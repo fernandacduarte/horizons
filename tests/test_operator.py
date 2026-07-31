@@ -108,8 +108,9 @@ class TestEquivariance:
 # Locality: 2-layer SAGE has 2-hop receptive field
 # ----------------------------------------------------------------------
 class TestLocality:
+    @pytest.mark.parametrize("conv_type", ["sage", "gated_sage"])
     def test_far_perturbation_does_not_affect_local_output(
-        self, anticline: HorizonSurface
+        self, anticline: HorizonSurface, conv_type: str
     ) -> None:
         """The model has 2 SAGEConv layers, so each vertex's output depends
         only on its 2-hop neighborhood. Perturbing z on a vertex 3+ hops
@@ -125,9 +126,12 @@ class TestLocality:
 
         So: perturbing z at vertex j only changes Δz_i if i is within
         3 hops of j.
+
+        Checked for gated_sage too: the gate is a function of (h_i, h_j)
+        only, so gating must not widen the receptive field.
         """
         torch.manual_seed(0)
-        model = LocalOperator()
+        model = LocalOperator(conv_type=conv_type)
         model.eval()
 
         inputs = _build_inputs(anticline)
@@ -303,6 +307,31 @@ class TestConvType:
         for p in model.parameters():
             if p.requires_grad:
                 assert p.grad is not None and torch.isfinite(p.grad).all()
+
+    def test_gated_sage_forward_shape(self, anticline: HorizonSurface) -> None:
+        """Gated SAGE variant builds and produces the same (n,) output."""
+        model = LocalOperator(conv_type="gated_sage")
+        inputs = _build_inputs(anticline)
+        dz = model(**inputs)
+        assert dz.shape == (anticline.n_vertices,)
+        assert dz.dtype == anticline.V.dtype
+
+    def test_gated_sage_gradients_flow(self, anticline: HorizonSurface) -> None:
+        """Gradients reach every parameter, including both halves of the
+        gate — a gate that saturates dead at init would show up here."""
+        model = LocalOperator(conv_type="gated_sage")
+        inputs = _build_inputs(anticline)
+        model(**inputs).sum().backward()
+        for name, p in model.named_parameters():
+            if p.requires_grad:
+                assert p.grad is not None, f"no grad for {name}"
+                assert torch.isfinite(p.grad).all(), f"non-finite grad for {name}"
+
+    def test_gated_sage_rejects_max_aggr(self) -> None:
+        """A gated max is not well defined; fail loudly rather than
+        silently ignoring the aggr the config asked for."""
+        with pytest.raises(ValueError, match="aggr"):
+            LocalOperator(conv_type="gated_sage", aggr="max")
 
     def test_unknown_conv_type_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown conv_type"):

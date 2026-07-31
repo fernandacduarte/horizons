@@ -26,6 +26,19 @@ def save_fake_checkpoint(path: Path, model: LocalOperator) -> Path:
     return path
 
 
+def toy_forward_args() -> tuple:
+    """A plane with a couple of triangles — enough to exercise the forward."""
+    V_xy = torch.tensor([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+    z = torch.tensor([0.0, 0.1, 0.2, 0.3])
+    F = torch.tensor([[0, 1, 2], [1, 3, 2]])
+    edge_index = torch.tensor(
+        [[0, 1, 1, 2, 2, 3, 0, 2, 1, 3], [1, 0, 2, 1, 3, 2, 2, 0, 3, 1]]
+    )
+    mask = torch.tensor([True, True, False, False])
+    d = torch.tensor([0, 0, 1, 1])
+    return (z, V_xy, edge_index, F, mask, d)
+
+
 class TestInferInputProjLayers:
     @pytest.mark.parametrize("layers", [1, 2])
     def test_reads_the_depth_off_the_state_dict(self, layers: int) -> None:
@@ -49,17 +62,20 @@ class TestLoadCheckpoint:
         loaded = load_checkpoint(path, hidden_dim=8).model
         assert isinstance(loaded, LocalOperator)
 
-        # A plane with a couple of triangles is enough to exercise the forward.
-        V_xy = torch.tensor([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
-        z = torch.tensor([0.0, 0.1, 0.2, 0.3])
-        F = torch.tensor([[0, 1, 2], [1, 3, 2]])
-        edge_index = torch.tensor(
-            [[0, 1, 1, 2, 2, 3, 0, 2, 1, 3], [1, 0, 2, 1, 3, 2, 2, 0, 3, 1]]
-        )
-        mask = torch.tensor([True, True, False, False])
-        d = torch.tensor([0, 0, 1, 1])
+        args = toy_forward_args()
+        assert torch.allclose(loaded(*args), model(*args))
 
-        args = (z, V_xy, edge_index, F, mask, d)
+    def test_gated_sage_round_trip(self, tmp_path: Path) -> None:
+        """The gated conv's submodules must serialise and reload cleanly —
+        eval rebuilds the architecture from the run's config.yaml, so a
+        name mismatch would only surface at eval time."""
+        torch.manual_seed(0)
+        model = LocalOperator(hidden_dim=8, conv_type="gated_sage")
+        path = save_fake_checkpoint(tmp_path / "best.pt", model)
+
+        loaded = load_checkpoint(path, hidden_dim=8, conv_type="gated_sage").model
+
+        args = toy_forward_args()
         assert torch.allclose(loaded(*args), model(*args))
 
     def test_explicit_layers_override_inference(self, tmp_path: Path) -> None:

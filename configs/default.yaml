@@ -63,7 +63,10 @@ model_kind: operator
 approach: rollout # rollout (standard) | hybrid (harmonic init + GNN refine)
 
 model:
-  type: sage                         # sage | edgeconv | gmm (sage default)
+  type: sage                         # sage | edgeconv | gated_sage | gmm (sage default)
+                                     # gated_sage: SAGE with a learned per-edge sigmoid
+                                     # gate, so neighbours can be discounted rather than
+                                     # averaged in. Accepts aggr: mean | add only.
   n_layers: 2                        # message-passing depth
   hidden_dim: 64
   aggr: mean                         # for SAGEConv

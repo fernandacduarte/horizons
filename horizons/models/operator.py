@@ -37,6 +37,7 @@ from horizons.data.features import (
     compute_vertex_normals,
     compute_umbrella_laplacian,
 )
+from horizons.models.gated_sage import GatedSAGEConv
 
 
 class LocalOperator(nn.Module):
@@ -55,13 +56,15 @@ class LocalOperator(nn.Module):
         weight. Smaller means smaller initial Δz, which is more stable
         for the rollout.
     conv_type : str
-        Which message-passing operator to use: "sage" (SAGEConv, default) 
-        or "edgeconv" (EdgeConv / DGCNN,
-        whose edge messages use the neighbour difference h_j - h_i).
+        Which message-passing operator to use: "sage" (SAGEConv, default),
+        "edgeconv" (EdgeConv / DGCNN, whose edge messages use the neighbour
+        difference h_j - h_i), or "gated_sage" (GatedSAGEConv, which weights
+        each neighbour message by a learned sigmoid gate so the operator can
+        discount unreliable neighbours instead of averaging them in).
     aggr : str
         Neighbour aggregation for each layer ("mean", "max", ...), passed
         straight to the underlying conv. SAGE uses "mean"; EdgeConv is
-        canonically "max".
+        canonically "max"; GatedSAGE accepts only "mean" or "add".
     mask_mode : str
         How the mask input feature is encoded:
         - "binary" (default): 1.0 for known vertices, 0.0 for unknown.
@@ -162,6 +165,11 @@ class LocalOperator(nn.Module):
         - "edgeconv": EdgeConv (DGCNN) — each edge message is
           h_Θ([h_i, h_j - h_i]); the explicit neighbour *difference*
           gives a local-gradient inductive bias (the reason we're trying it).
+        - "gated_sage": GatedSAGEConv — SAGE's self-term plus a *gated* mean,
+          each neighbour message scaled by e_ij = sigmoid(A·h_i + B·h_j).
+          The anisotropy is the point: neighbours here are unequally
+          reliable (they sit at different distances from the known set) and
+          a plain mean cannot discount them.
         """
         if conv_type == "sage":
             return SAGEConv(hidden_dim, hidden_dim, aggr=aggr)
@@ -172,8 +180,11 @@ class LocalOperator(nn.Module):
                 nn.Linear(hidden_dim, hidden_dim),
             )
             return EdgeConv(mlp, aggr=aggr)
+        if conv_type == "gated_sage":
+            return GatedSAGEConv(hidden_dim, hidden_dim, aggr=aggr)
         raise ValueError(
-            f"Unknown conv_type {conv_type!r}; expected 'sage' or 'edgeconv'"
+            f"Unknown conv_type {conv_type!r}; "
+            f"expected 'sage', 'edgeconv' or 'gated_sage'"
         )
 
     def _mask_feature(

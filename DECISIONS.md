@@ -1549,6 +1549,60 @@ single test_id 4-bar chart. Full numbers in O28.
 
 ---
 
+### D12.7 — Third operator: `conv_type="gated_sage"` (GatedSAGEConv)
+
+**Decision:** `_make_conv` gains a third arm, `"gated_sage"`, returning
+`GatedSAGEConv(H, H, aggr)` — SAGE's self-term plus a *gated* neighbour mean:
+
+```
+e_ij = sigmoid(A·h_i + B·h_j)              per-edge, per-channel gate
+m_i  = sum_j e_ij * (W_nbr·h_j) / (sum_j e_ij + eps)
+h_i' = W_self·h_i + m_i
+```
+
+Normalising by the **gate sum** rather than by degree makes it a gated *mean*,
+so the output scale matches `SAGEConv(aggr="mean")` and `output_init_scale`,
+the LR and the loss weights carry over from the SAGE baseline untouched. The
+gate is per-channel (different features can have different trust profiles);
+`eps` also makes a vertex with no incoming edges return exactly `W_self·h_i`.
+`aggr` accepts `"mean"` (default) or `"add"`; `"max"` raises, since a gated max
+would rescale candidates before a non-linear selection and silently ignoring
+the config's `aggr` would be worse than failing.
+
+**Where:** `horizons/models/gated_sage.py` (new), `horizons/models/operator.py`
+(`_make_conv`), `configs/default.yaml` (`model.type` vocabulary).
+Nothing else changed: `conv_type` is already a pass-through kwarg in
+`load_checkpoint`, every eval script reads `model.type` out of the run's
+`config.yaml`, and `noise_band_many.py`'s `CONFIG_FIELDS` already carries
+`("conv", "model", "type", "sage")`, so the sweep labels the arm on its own.
+Tests: `tests/test_gated_sage.py` (layer), `tests/test_operator.py::TestConvType`
+and `::TestLocality` (parametrized over sage/gated_sage),
+`tests/test_checkpoint.py::TestLoadCheckpoint::test_gated_sage_round_trip`.
+
+**Why:** D12.1 framed EdgeConv as "the one genuinely different axis" because
+SAGE's `W1·h_i + W2·mean(h_j)` is an averaging operator. Gating attacks the
+same weakness from the other side — not the *content* of the message
+(EdgeConv's `h_j − h_i`) but its *weight*. This problem makes that
+particularly apt: the rollout pushes information from the known region
+outward, so a vertex's neighbours are systematically unequal in reliability —
+a neighbour one ring from the known data carries far better information than
+one seven rings out, which early in the rollout still mostly carries the
+initial guess. `mask` and `d` are input *features*, so a mean aggregator can
+let them shift a message but never discount it. Gating is also the variant
+whose learned quantity is directly inspectable: `e_ij` can be plotted against
+`d[j]` to show *what* the network learned, not just that it scored better.
+
+**Cost:** 4·H² vs SAGE's 2·H² per layer — 33.0k conv params vs 16.5k, 42.0k
+total vs 25.5k at H=64. Between SAGE and a width-matched comparison, note
+that EdgeConv (33.9k total) sits closer to gated_sage, so the three-way
+comparison is not param-matched.
+
+**Status:** Implemented and unit-tested; default is still `"sage"`, so nothing
+changes unless `model.type=gated_sage` is passed. Accuracy result pending a
+full run. `"gmm"` remains accepted in the config vocabulary but unimplemented.
+
+---
+
 ## Future / open decisions
 
 These are decisions we know we need to make but haven't yet, or
@@ -1556,7 +1610,8 @@ ablations queued for Stage 12.
 
 **Architecture and features (Stage 12 ablations):**
 - **Curvature variant (D1.4):** umbrella → cotangent Laplacian.
-- **GNN backbone (D6.2):** SAGEConv → EdgeConv or GMMConv.
+- **GNN backbone (D6.2):** SAGEConv → EdgeConv (D12.1), GatedSAGEConv
+  (D12.7) or GMMConv (not implemented).
 - **Frozen vs. recomputed features (D6.1):** the per-iteration-recompute
   decision can be compared against holding features at $t=0$.
 - **Drop topological distance feature (D6.4):** verifies whether $d$
