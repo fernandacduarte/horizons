@@ -13,11 +13,15 @@ With use_mask_feature=False the mask column is dropped and the input is
 8-dim — the ablation that measures whether the mask feature helps.
 
 Default pipeline:
-    input MLP (9 -> H)
+    input MLP (9 -> H -> H)
     SAGEConv (H -> H, mean aggr)
     ReLU
     SAGEConv (H -> H, mean aggr)
     output MLP (H -> H -> 1)
+
+input_proj_layers=1 replaces the input MLP with a single Linear (9 -> H).
+That was the form used for the runs up to July 2026, so their checkpoints
+need it to load.
 
 The final layer is initialized with small weights so that Δz ≈ 0 at the
 start of training (prevents the first rollout iteration from making
@@ -76,6 +80,11 @@ class LocalOperator(nn.Module):
         the network is not blind to which vertices are known.
         This changes the input layer's shape, so checkpoints trained with
         one setting cannot be loaded into a model built with the other.
+    input_proj_layers : int
+        Depth of the input projection: 2 (default) for the MLP
+        (Linear -> ReLU -> Linear), 1 for a single Linear. Only affects
+        which checkpoints can be loaded; see `load_checkpoint`, which infers
+        it from the saved state dict.
     """
 
     N_INPUT_FEATURES = 9  # (x, y, z, n_x, n_y, n_z, kappa, mask, d)
@@ -89,6 +98,7 @@ class LocalOperator(nn.Module):
         aggr: str = "mean",
         mask_mode: str = "binary",
         use_mask_feature: bool = True,
+        input_proj_layers: int = 2,
     ) -> None:
         super().__init__()
         if n_message_passing < 1:
@@ -99,6 +109,10 @@ class LocalOperator(nn.Module):
             raise ValueError(
                 f"unknown mask_mode {mask_mode!r}; "
                 f"expected 'binary' or 'soft_distance'"
+            )
+        if input_proj_layers not in (1, 2):
+            raise ValueError(
+                f"input_proj_layers must be 1 or 2; got {input_proj_layers}"
             )
 
         self.conv_type = conv_type
@@ -111,12 +125,15 @@ class LocalOperator(nn.Module):
             self.N_INPUT_FEATURES if use_mask_feature
             else self.N_INPUT_FEATURES - 1
         )
-        # self.input_proj = nn.Linear(self.n_input_features, hidden_dim)
-        self.input_proj = nn.Sequential(
-            nn.Linear(self.n_input_features, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-        )
+        self.input_proj_layers = input_proj_layers
+        if input_proj_layers == 1:
+            self.input_proj = nn.Linear(self.n_input_features, hidden_dim)
+        else:
+            self.input_proj = nn.Sequential(
+                nn.Linear(self.n_input_features, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+            )
 
         # Message-passing stack (operator chosen by conv_type)
         self.convs = nn.ModuleList([

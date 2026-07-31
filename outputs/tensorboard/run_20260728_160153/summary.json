@@ -1,0 +1,10 @@
+{
+  "best_val_loss": 7.525344761334257,
+  "best_val_epoch": 72,
+  "n_epochs_completed": 103,
+  "early_stopped": true,
+  "early_stop_reason": "no val_rmse_meters improvement for 30 epochs (patience=30)",
+  "checkpoint_path": "outputs/tensorboard/run_20260728_160153/best.pt",
+  "final_train_loss": 5.655241096198097,
+  "final_val_loss": 7.516501479290633
+}

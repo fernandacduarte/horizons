@@ -64,6 +64,23 @@ class LoadedCheckpoint:
     raw: dict[str, Any]
 
 
+def infer_input_proj_layers(state: dict[str, Any]) -> int:
+    """Read the input projection's depth off a saved state dict.
+
+    Runs up to July 2026 projected the input features with a single Linear
+    ("input_proj.weight"); later ones use an MLP ("input_proj.0.weight").
+    Both remain loadable as long as we build the matching shape.
+    """
+    if "input_proj.weight" in state:
+        return 1
+    if "input_proj.0.weight" in state:
+        return 2
+    raise ValueError(
+        "Checkpoint has no recognizable input_proj weights; keys start with: "
+        f"{sorted(state)[:5]}"
+    )
+
+
 def load_checkpoint(
     path: str | Path,
     model: torch.nn.Module | None = None,
@@ -75,6 +92,7 @@ def load_checkpoint(
     aggr: str = "mean",
     mask_mode: str = "binary",
     use_mask_feature: bool = True,
+    input_proj_layers: int | None = None,
     device: str | torch.device = "cpu",
 ) -> LoadedCheckpoint:
     """Load a checkpoint from disk.
@@ -96,6 +114,10 @@ def load_checkpoint(
         it must match training for predictions to be meaningful.
         use_mask_feature does change the input layer's shape, so a
         mismatch fails loudly at load time.)
+    input_proj_layers : int, optional
+        Depth of the input projection. Left as None it is inferred from the
+        saved weights, which is what lets checkpoints from before the input
+        projection became an MLP still load.
     device : str | torch.device
         Device to place the model on. The model is also set to eval mode.
 
@@ -128,6 +150,8 @@ def load_checkpoint(
 
     # Build the model if not provided
     if model is None:
+        if input_proj_layers is None:
+            input_proj_layers = infer_input_proj_layers(raw["model_state"])
         model = LocalOperator(
             hidden_dim=hidden_dim,
             n_message_passing=n_message_passing,
@@ -136,6 +160,7 @@ def load_checkpoint(
             aggr=aggr,
             mask_mode=mask_mode,
             use_mask_feature=use_mask_feature,
+            input_proj_layers=input_proj_layers,
         )
 
     # Load weights
